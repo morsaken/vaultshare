@@ -1,0 +1,989 @@
+// --- DOM Element References ---
+const connectionBadge = document.getElementById('connection-badge');
+const btnCreateRoom = document.getElementById('btn-create-room');
+const btnJoinRoom = document.getElementById('btn-join-room');
+const inputRoomId = document.getElementById('input-room-id');
+const sectionSetup = document.getElementById('section-setup');
+const sectionConnection = document.getElementById('section-connection');
+const displayRoomId = document.getElementById('display-room-id');
+const textChannelStatus = document.getElementById('text-channel-status');
+const btnLeaveRoom = document.getElementById('btn-leave-room');
+const displayFingerprint = document.getElementById('display-fingerprint');
+const chkVerified = document.getElementById('chk-verified');
+const sectionTransfer = document.getElementById('section-transfer');
+const dropzone = document.getElementById('dropzone');
+const inputFile = document.getElementById('input-file');
+const fileDetails = document.getElementById('file-details');
+const fileName = document.getElementById('file-name');
+const fileSize = document.getElementById('file-size');
+const btnCancelFile = document.getElementById('btn-cancel-file');
+const btnSendFile = document.getElementById('btn-send-file');
+const progressContainer = document.getElementById('progress-container');
+const progressStatus = document.getElementById('progress-status');
+const progressPercent = document.getElementById('progress-percent');
+const progressBarFill = document.getElementById('progress-bar-fill');
+const progressSpeed = document.getElementById('progress-speed');
+const progressEta = document.getElementById('progress-eta');
+const btnClearLogs = document.getElementById('btn-clear-logs');
+const logConsole = document.getElementById('log-console');
+
+// --- State Variables ---
+let ws = null;
+let roomId = null;
+let isInitiator = false;
+let peerConnection = null;
+let dataChannel = null;
+let myKeyPair = null;
+let peerPublicKey = null;
+let aesKey = null;
+let peerVerified = false;
+let selectedFile = null;
+
+// Transfer state tracking
+let startTime = 0;
+let totalBytesTransferred = 0;
+let expectedTotalChunks = 0;
+let receivedChunks = [];
+let fileMetadata = null;
+let isTransferring = false;
+
+// STUN server configurations
+const rtcConfig = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' }
+  ]
+};
+
+// --- Logging Helper ---
+function log(msg, type = 'system') {
+  const entry = document.createElement('div');
+  entry.className = `log-entry log-${type}`;
+  const now = new Date().toLocaleTimeString();
+  entry.innerText = `[${now}] [${type.toUpperCase()}] ${msg}`;
+  logConsole.appendChild(entry);
+  logConsole.scrollTop = logConsole.scrollHeight;
+}
+
+btnClearLogs.addEventListener('click', () => {
+  logConsole.innerHTML = '<div class="log-entry log-system">[SYSTEM] Console cleared.</div>';
+});
+
+// --- Base64 / ArrayBuffer Helpers ---
+function arrayBufferToBase64(buffer) {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return window.btoa(binary);
+}
+
+function base64ToArrayBuffer(base64) {
+  const binaryString = window.atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+// --- Cryptography Manager ---
+// The Web Crypto API (window.crypto.subtle) is only exposed in a "secure
+// context": HTTPS pages, or http on localhost/127.0.0.1. Opening the app over
+// plain http on a LAN IP (e.g. to test on a phone) leaves it undefined, which
+// is the usual reason the fingerprint never appears.
+function isCryptoAvailable() {
+  return !!(window.crypto && window.crypto.subtle);
+}
+
+async function generateECDHKeyPair() {
+  if (!isCryptoAvailable()) {
+    throw new Error('Web Crypto unavailable — serve over HTTPS or via http://localhost');
+  }
+  log('Generating ECDH keypair (P-256 curve)...', 'crypto');
+  myKeyPair = await window.crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-256' },
+    true,
+    ['deriveKey', 'deriveBits']
+  );
+  log('ECDH keypair generated successfully.', 'crypto');
+}
+
+async function deriveSessionKey(rawPeerPublicKeyBase64) {
+  log('Importing peer\'s public key...', 'crypto');
+  const peerPubKeyBuffer = base64ToArrayBuffer(rawPeerPublicKeyBase64);
+  peerPublicKey = await window.crypto.subtle.importKey(
+    'raw',
+    peerPubKeyBuffer,
+    { name: 'ECDH', namedCurve: 'P-256' },
+    true,
+    []
+  );
+
+  log('Deriving shared secret from ECDH key exchange...', 'crypto');
+  const sharedBits = await window.crypto.subtle.deriveBits(
+    { name: 'ECDH', public: peerPublicKey },
+    myKeyPair.privateKey,
+    256
+  );
+
+  log('Importing shared bits into HKDF...', 'crypto');
+  const hkdfKey = await window.crypto.subtle.importKey(
+    'raw',
+    sharedBits,
+    { name: 'HKDF' },
+    false,
+    ['deriveKey']
+  );
+
+  log('Deriving 256-bit AES-GCM session key using HKDF (SHA-256)...', 'crypto');
+  const salt = new Uint8Array(16); // Constant salt for single session context
+  const info = new TextEncoder().encode('VaultShare Session Key');
+  
+  aesKey = await window.crypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      salt: salt,
+      info: info,
+      hash: 'SHA-256'
+    },
+    hkdfKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+  
+  log('AES-GCM session key established. Encryption active!', 'crypto');
+  
+  // Calculate visual verification fingerprint code
+  await computeFingerprint(rawPeerPublicKeyBase64);
+}
+
+async function computeFingerprint(rawPeerPublicKeyBase64) {
+  const myPubRaw = await window.crypto.subtle.exportKey('raw', myKeyPair.publicKey);
+  const myPubBase64 = arrayBufferToBase64(myPubRaw);
+  
+  // Alphabetically sort the base64 public keys to guarantee same ordering on both sides
+  const sortedKeys = [myPubBase64, rawPeerPublicKeyBase64].sort().join('');
+  const sortedBuffer = new TextEncoder().encode(sortedKeys);
+  
+  const hashBuffer = await window.crypto.subtle.digest('SHA-256', sortedBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+  
+  // Group key fingerprint into readable chunks
+  const groups = hashHex.match(/.{1,4}/g).slice(0, 8).join('-');
+  displayFingerprint.innerText = groups;
+  log(`Calculated line verification code: ${groups}`, 'crypto');
+}
+
+// Encrypt string with AES-GCM
+async function encryptData(text, key) {
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  const encoded = new TextEncoder().encode(text);
+  const ciphertext = await window.crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    encoded
+  );
+  
+  const combined = new Uint8Array(iv.length + ciphertext.byteLength);
+  combined.set(iv, 0);
+  combined.set(new Uint8Array(ciphertext), iv.length);
+  return arrayBufferToBase64(combined);
+}
+
+// Decrypt string with AES-GCM
+async function decryptData(combinedBase64, key) {
+  const combined = base64ToArrayBuffer(combinedBase64);
+  const iv = combined.slice(0, 12);
+  const ciphertext = combined.slice(12);
+  
+  const decrypted = await window.crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    ciphertext
+  );
+  
+  return new TextDecoder().decode(decrypted);
+}
+
+// --- Signaling Connection ---
+function initSignaling() {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${protocol}//${window.location.host}`;
+  
+  log(`Connecting to signaling server at ${wsUrl}...`, 'system');
+  connectionBadge.className = 'badge badge-connecting';
+  connectionBadge.innerText = 'Connecting...';
+  
+  ws = new WebSocket(wsUrl);
+  
+  ws.onopen = () => {
+    log('Signaling server connected.', 'system');
+    connectionBadge.className = 'badge badge-connected';
+    connectionBadge.innerText = 'Online';
+  };
+  
+  ws.onclose = () => {
+    log('Signaling server disconnected. Reconnecting in 3s...', 'system');
+    connectionBadge.className = 'badge badge-disconnected';
+    connectionBadge.innerText = 'Offline';
+    setTimeout(initSignaling, 3000);
+  };
+  
+  ws.onerror = (err) => {
+    log(`Signaling server error: ${err.message || 'unknown'}`, 'error');
+  };
+  
+  ws.onmessage = async (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      
+      switch (msg.type) {
+        case 'joined':
+          log(`Joined room: ${msg.roomId} as peer #${msg.peerCount}`, 'p2p');
+          roomId = msg.roomId;
+          isInitiator = (msg.peerCount === 1);
+          showConnectionUI(msg.roomId);
+          break;
+          
+        case 'peer-joined':
+          log('Peer connected to room. Initiating key exchange...', 'p2p');
+          textChannelStatus.innerText = 'Performing key exchange...';
+          
+          // Generate key pair and send public key to peer
+          await generateECDHKeyPair();
+          const exportedPub = await window.crypto.subtle.exportKey('raw', myKeyPair.publicKey);
+          sendSignal({ 
+            type: 'ecdh-pub', 
+            key: arrayBufferToBase64(exportedPub) 
+          });
+          break;
+          
+        case 'peer-left':
+          log('Peer disconnected from room. Resetting connection.', 'error');
+          resetConnection();
+          break;
+          
+        case 'signal':
+          await handleSignal(msg.payload);
+          break;
+          
+        case 'error':
+          log(`Server error: ${msg.message}`, 'error');
+          alert(`Server error: ${msg.message}`);
+          // Only tear down if we actually have an active session. Join-time
+          // errors (e.g. "Room is full") happen before any connection exists,
+          // so resetting would needlessly bounce the user around.
+          if (roomId) {
+            resetConnection();
+          }
+          break;
+      }
+    } catch (err) {
+      log(`Error handling WebSocket message: ${err.message}`, 'error');
+    }
+  };
+}
+
+function sendWS(message) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(message));
+  }
+}
+
+function sendSignal(payload) {
+  sendWS({ type: 'signal', payload });
+}
+
+// Handle incoming WebRTC/ECDH signaling
+async function handleSignal(payload) {
+  if (payload.type === 'ecdh-pub') {
+    // Key Exchange Phase
+    log('Received peer\'s ECDH public key.', 'crypto');
+    if (!myKeyPair) {
+      // Receiver generates key pair if they haven't already
+      await generateECDHKeyPair();
+      const exportedPub = await window.crypto.subtle.exportKey('raw', myKeyPair.publicKey);
+      sendSignal({ 
+        type: 'ecdh-pub', 
+        key: arrayBufferToBase64(exportedPub) 
+      });
+    }
+    
+    await deriveSessionKey(payload.key);
+    textChannelStatus.innerText = 'Fingerprint code generated. Verify line security.';
+    
+    // Now that the line is secure, the initiator creates the WebRTC offer
+    if (isInitiator) {
+      log('Line secured. Initiating WebRTC peer connection...', 'p2p');
+      setupWebRTC();
+    }
+  } else if (payload.type === 'verified' || payload.type === 'unverified') {
+    // Peer announced their security-code verification state.
+    peerVerified = (payload.type === 'verified');
+    log(
+      peerVerified
+        ? 'Peer confirmed they verified the security code.'
+        : 'Peer cleared their verification.',
+      peerVerified ? 'success' : 'system'
+    );
+    refreshVerificationStatus();
+    // Re-evaluate the send lock (peer state may have just unlocked/locked it).
+    toggleInputStates(isTransferring);
+  } else {
+    // WebRTC Encrypted Handshake Phase
+    if (!aesKey) {
+      log('Warning: Received WebRTC signal before encryption key derived. Dropping.', 'error');
+      return;
+    }
+    
+    try {
+      const decrypted = await decryptPayload(payload.data);
+      
+      if (decrypted.type === 'offer') {
+        log('Received encrypted WebRTC offer. Configuring peer connection...', 'p2p');
+        if (!peerConnection) setupWebRTC();
+        
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(decrypted.sdp));
+        log('Remote description set (offer). Creating WebRTC answer...', 'p2p');
+        
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        
+        const encryptedAnswer = await encryptPayload({ type: 'answer', sdp: answer });
+        sendSignal({ type: 'webrtc-handshake', data: encryptedAnswer });
+        log('Sent encrypted WebRTC answer.', 'p2p');
+        
+      } else if (decrypted.type === 'answer') {
+        log('Received encrypted WebRTC answer. Finalizing peer connection...', 'p2p');
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(decrypted.sdp));
+        log('Remote description set (answer). Handshake complete.', 'p2p');
+        
+      } else if (decrypted.type === 'candidate') {
+        if (decrypted.candidate) {
+          log('Received encrypted ICE candidate.', 'p2p');
+          if (peerConnection) {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(decrypted.candidate));
+          }
+        }
+      }
+    } catch (err) {
+      log(`Error processing encrypted WebRTC signal: ${err.message}`, 'error');
+    }
+  }
+}
+
+// Payload encryption helpers for signaling
+async function encryptPayload(dataObj) {
+  const jsonStr = JSON.stringify(dataObj);
+  return await encryptData(jsonStr, aesKey);
+}
+
+async function decryptPayload(ciphertextBase64) {
+  const jsonStr = await decryptData(ciphertextBase64, aesKey);
+  return JSON.parse(jsonStr);
+}
+
+// --- WebRTC P2P Manager ---
+function setupWebRTC() {
+  log('Initializing RTCPeerConnection...', 'p2p');
+  peerConnection = new RTCPeerConnection(rtcConfig);
+  
+  peerConnection.onicecandidate = async (e) => {
+    if (e.candidate) {
+      log('Local ICE candidate gathered. Encrypting & sending...', 'p2p');
+      const encryptedCandidate = await encryptPayload({
+        type: 'candidate',
+        candidate: {
+          candidate: e.candidate.candidate,
+          sdpMid: e.candidate.sdpMid,
+          sdpMLineIndex: e.candidate.sdpMLineIndex
+        }
+      });
+      sendSignal({ type: 'webrtc-handshake', data: encryptedCandidate });
+    }
+  };
+  
+  peerConnection.oniceconnectionstatechange = () => {
+    log(`ICE connection state changed: ${peerConnection.iceConnectionState}`, 'p2p');
+    if (peerConnection.iceConnectionState === 'connected') {
+      log('Direct WebRTC peer connection established!', 'p2p');
+      textChannelStatus.innerText = 'P2P Tunnel active';
+      sectionTransfer.classList.remove('hidden');
+      // Start locked: the user must check the verification box before sending.
+      toggleInputStates(false);
+    } else if (peerConnection.iceConnectionState === 'failed' || peerConnection.iceConnectionState === 'disconnected') {
+      log('WebRTC connection dropped.', 'error');
+      resetConnection();
+    }
+  };
+  
+  if (isInitiator) {
+    log('Creating data channel "file-transfer"...', 'p2p');
+    dataChannel = peerConnection.createDataChannel('file-transfer', { ordered: true });
+    setupDataChannel(dataChannel);
+    
+    // Create offer
+    peerConnection.createOffer()
+      .then(async (offer) => {
+        await peerConnection.setLocalDescription(offer);
+        const encryptedOffer = await encryptPayload({ type: 'offer', sdp: offer });
+        sendSignal({ type: 'webrtc-handshake', data: encryptedOffer });
+        log('Sent encrypted WebRTC offer.', 'p2p');
+      })
+      .catch((err) => {
+        log(`Failed to create WebRTC offer: ${err.message}`, 'error');
+      });
+  } else {
+    // Receiver waits for data channel event
+    peerConnection.ondatachannel = (event) => {
+      log('Remote data channel detected.', 'p2p');
+      dataChannel = event.channel;
+      setupDataChannel(dataChannel);
+    };
+  }
+}
+
+function setupDataChannel(channel) {
+  channel.binaryType = 'arraybuffer';
+  
+  channel.onopen = () => {
+    log('P2P Data Channel opened. Channel is ready for transmission.', 'p2p');
+  };
+  
+  channel.onclose = () => {
+    log('P2P Data Channel closed.', 'p2p');
+  };
+  
+  channel.onmessage = (event) => {
+    handleIncomingData(event.data);
+  };
+}
+
+// --- File Encryption & Transmission Protocol ---
+async function calculateSHA256(arrayBuffer) {
+  const hashBuffer = await window.crypto.subtle.digest('SHA-256', arrayBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function sendFile() {
+  if (!selectedFile || !dataChannel || dataChannel.readyState !== 'open' || !aesKey) {
+    log('Cannot send: connection not ready.', 'error');
+    return;
+  }
+
+  if (!chkVerified.checked) {
+    log('Send blocked: security code not verified.', 'error');
+    alert('Please verify the security code with your peer before sending files.');
+    return;
+  }
+
+  if (!peerVerified) {
+    log('Send blocked: peer has not verified the security code.', 'error');
+    alert('Your peer has not verified the security code yet. Wait until they confirm before sending.');
+    return;
+  }
+  
+  isTransferring = true;
+  toggleInputStates(true);
+  progressContainer.classList.remove('hidden');
+  progressStatus.innerText = 'Calculating SHA-256 checksum...';
+  progressPercent.innerText = '0%';
+  progressBarFill.style.width = '0%';
+  
+  const fileBytes = await selectedFile.arrayBuffer();
+  
+  log('Generating SHA-256 file checksum for integrity verification...', 'crypto');
+  const fileHash = await calculateSHA256(fileBytes);
+  log(`Checksum derived: ${fileHash}`, 'crypto');
+  
+  // Header details
+  const chunkSize = 60 * 1024; // 60 KB to fit within 64KB WebRTC MTU
+  const totalChunks = Math.ceil(selectedFile.size / chunkSize);
+  
+  const metadata = {
+    name: selectedFile.name,
+    size: selectedFile.size,
+    type: selectedFile.type || 'application/octet-stream',
+    totalChunks,
+    sha256: fileHash
+  };
+  
+  // Encrypt and send metadata header packet
+  // Structure: [1-byte message type = 0x01] + [12-byte IV] + [ciphertext]
+  log(`Sending file metadata: ${metadata.name} (${metadata.size} bytes) in ${totalChunks} chunks.`, 'p2p');
+  progressStatus.innerText = 'Encrypting & sending metadata...';
+  
+  const metadataStr = JSON.stringify(metadata);
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  const encryptedMeta = await window.crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    aesKey,
+    new TextEncoder().encode(metadataStr)
+  );
+  
+  const metaPacket = new Uint8Array(1 + 12 + encryptedMeta.byteLength);
+  metaPacket[0] = 0x01; // type 0x01
+  metaPacket.set(iv, 1);
+  metaPacket.set(new Uint8Array(encryptedMeta), 13);
+  
+  dataChannel.send(metaPacket);
+  
+  // Send file chunks with backpressure
+  log('Starting file chunk transmission stream...', 'p2p');
+  startTime = Date.now();
+  totalBytesTransferred = 0;
+  
+  const BUFFER_THRESHOLD = 64 * 1024; // 64 KB threshold
+  dataChannel.bufferedAmountLowThreshold = BUFFER_THRESHOLD;
+  
+  let offset = 0;
+  for (let i = 0; i < totalChunks; i++) {
+    // Backpressure check
+    if (dataChannel.bufferedAmount > BUFFER_THRESHOLD) {
+      await new Promise((resolve) => {
+        dataChannel.onbufferedamountlow = () => {
+          dataChannel.onbufferedamountlow = null;
+          resolve();
+        };
+      });
+    }
+    
+    if (!isTransferring) return; // Transfer was cancelled
+    
+    const end = Math.min(offset + chunkSize, selectedFile.size);
+    const chunkBytes = fileBytes.slice(offset, end);
+    offset = end;
+    
+    // Chunk payload: [4-byte sequence index] + [data]
+    const payload = new Uint8Array(4 + chunkBytes.byteLength);
+    const view = new DataView(payload.buffer);
+    view.setUint32(0, i);
+    payload.set(new Uint8Array(chunkBytes), 4);
+    
+    // Encrypt chunk
+    const chunkIv = window.crypto.getRandomValues(new Uint8Array(12));
+    const encryptedChunk = await window.crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: chunkIv },
+      aesKey,
+      payload
+    );
+    
+    // Packet structure: [1-byte message type = 0x02] + [12-byte IV] + [ciphertext]
+    const packet = new Uint8Array(1 + 12 + encryptedChunk.byteLength);
+    packet[0] = 0x02; // type 0x02
+    packet.set(chunkIv, 1);
+    packet.set(new Uint8Array(encryptedChunk), 13);
+    
+    dataChannel.send(packet);
+    totalBytesTransferred += chunkBytes.byteLength;
+    
+    updateProgress(i + 1, totalChunks, 'Uploading');
+  }
+  
+  // Complete message
+  log('File transmission stream finished. Sending finalization trigger.', 'p2p');
+  const completeIv = window.crypto.getRandomValues(new Uint8Array(12));
+  const encryptedComplete = await window.crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: completeIv },
+    aesKey,
+    new TextEncoder().encode('complete')
+  );
+  const completePacket = new Uint8Array(1 + 12 + encryptedComplete.byteLength);
+  completePacket[0] = 0x04; // type 0x04
+  completePacket.set(completeIv, 1);
+  completePacket.set(new Uint8Array(encryptedComplete), 13);
+  
+  dataChannel.send(completePacket);
+  
+  log(`Transfer of ${selectedFile.name} completed successfully!`, 'send');
+  progressStatus.innerText = 'Transfer Complete!';
+  
+  setTimeout(() => {
+    isTransferring = false;
+    toggleInputStates(false);
+    progressContainer.classList.add('hidden');
+    clearSelectedFile();
+  }, 2000);
+}
+
+// Send a small encrypted control message over the data channel.
+// Used for out-of-band signals like "I haven't verified the code yet".
+async function sendDataChannelControl(typeByte, text) {
+  if (!dataChannel || dataChannel.readyState !== 'open' || !aesKey) return;
+
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await window.crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    aesKey,
+    new TextEncoder().encode(text)
+  );
+
+  const packet = new Uint8Array(1 + 12 + encrypted.byteLength);
+  packet[0] = typeByte;
+  packet.set(iv, 1);
+  packet.set(new Uint8Array(encrypted), 13);
+  dataChannel.send(packet);
+}
+
+// Receive and decrypt data chunks
+async function handleIncomingData(arrayBuffer) {
+  const view = new Uint8Array(arrayBuffer);
+  const type = view[0];
+  const iv = view.slice(1, 13);
+  const ciphertext = view.slice(13);
+  
+  if (!aesKey) {
+    log('Security Error: Received P2P packet but line is not encrypted.', 'error');
+    return;
+  }
+
+  if (!chkVerified.checked) {
+    // Only act once (on the metadata packet) so chunks don't spam the log/peer.
+    if (type === 0x01) {
+      log('Incoming file blocked: verify the security code first to receive files.', 'error');
+      alert('A peer is trying to send you a file. Verify the security code to receive it.');
+      // Tell the sender to stop — we won't accept data over an unverified channel.
+      sendDataChannelControl(0x05, 'unverified');
+    }
+    return;
+  }
+
+  try {
+    const decrypted = await window.crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv },
+      aesKey,
+      ciphertext
+    );
+    
+    if (type === 0x01) {
+      // File Metadata
+      const metaStr = new TextDecoder().decode(decrypted);
+      fileMetadata = JSON.parse(metaStr);
+      
+      log(`Received metadata: ${fileMetadata.name} (${fileMetadata.size} bytes), expecting ${fileMetadata.totalChunks} chunks.`, 'p2p');
+      log(`Peer's file SHA-256 checksum: ${fileMetadata.sha256}`, 'crypto');
+      
+      expectedTotalChunks = fileMetadata.totalChunks;
+      receivedChunks = new Array(expectedTotalChunks);
+      totalBytesTransferred = 0;
+      startTime = Date.now();
+      isTransferring = true;
+      toggleInputStates(true);
+      
+      progressContainer.classList.remove('hidden');
+      updateProgress(0, expectedTotalChunks, 'Downloading');
+      
+    } else if (type === 0x02) {
+      // File Chunk
+      const payloadView = new Uint8Array(decrypted);
+      const dataView = new DataView(decrypted);
+      const chunkIndex = dataView.getUint32(0);
+      const chunkData = payloadView.slice(4);
+      
+      receivedChunks[chunkIndex] = chunkData;
+      totalBytesTransferred += chunkData.byteLength;
+      
+      const chunksLoaded = receivedChunks.filter(c => c !== undefined).length;
+      updateProgress(chunksLoaded, expectedTotalChunks, 'Downloading');
+      
+    } else if (type === 0x04) {
+      // File Transfer Complete
+      log('Received finalization trigger. Reassembling file chunks...', 'p2p');
+      progressStatus.innerText = 'Reassembling and verifying file...';
+      
+      // Ensure we have all chunks
+      const missingChunks = [];
+      for (let i = 0; i < expectedTotalChunks; i++) {
+        if (!receivedChunks[i]) missingChunks.push(i);
+      }
+      
+      if (missingChunks.length > 0) {
+        log(`Security/Transfer Error: Missing ${missingChunks.length} chunks. Download aborted.`, 'error');
+        resetTransferState();
+        return;
+      }
+      
+      const fileBlob = new Blob(receivedChunks, { type: fileMetadata.type });
+      const assembledBuffer = await fileBlob.arrayBuffer();
+      
+      log('Running integrity validation on received file...', 'crypto');
+      const receivedHash = await calculateSHA256(assembledBuffer);
+      log(`Derived checksum: ${receivedHash}`, 'crypto');
+      
+      if (receivedHash !== fileMetadata.sha256) {
+        log('Security Integrity Error: Checksum mismatch! File has been altered or corrupted.', 'error');
+        alert('Security Integrity Error: Checksum mismatch! Transfer aborted.');
+      } else {
+        log('Integrity verified! File hash matches peer hash perfectly.', 'success');
+        
+        // Trigger save download
+        const url = URL.createObjectURL(fileBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileMetadata.name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        log(`Successfully downloaded and saved: ${fileMetadata.name}`, 'recv');
+        progressStatus.innerText = 'Download Successful!';
+      }
+      
+      setTimeout(() => {
+        resetTransferState();
+      }, 2000);
+
+    } else if (type === 0x05) {
+      // Peer signalled they have not verified the security code. Abort our send.
+      // resetTransferState() flips isTransferring off, which halts the send loop.
+      log('Peer has not verified the security code. Transfer aborted.', 'error');
+      alert('Your peer has not verified the security code yet. Transfer aborted — ask them to verify, then send again.');
+      resetTransferState();
+    }
+  } catch (err) {
+    log(`Crypto decryption error during transfer: ${err.message}`, 'error');
+    resetTransferState();
+  }
+}
+
+// Progress metrics updater
+function updateProgress(chunksLoaded, totalChunks, label = 'Transferring') {
+  const percent = Math.round((chunksLoaded / totalChunks) * 100);
+  progressPercent.innerText = `${percent}%`;
+  progressBarFill.style.width = `${percent}%`;
+  
+  const elapsed = (Date.now() - startTime) / 1000;
+  if (elapsed > 0) {
+    const bytesPerSec = totalBytesTransferred / elapsed;
+    let speedText = '';
+    if (bytesPerSec > 1024 * 1024) {
+      speedText = `${(bytesPerSec / (1024 * 1024)).toFixed(2)} MB/s`;
+    } else {
+      speedText = `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
+    }
+    progressSpeed.innerText = speedText;
+    
+    const fileTotalSize = fileMetadata ? fileMetadata.size : (selectedFile ? selectedFile.size : 0);
+    const bytesRemaining = fileTotalSize - totalBytesTransferred;
+    if (bytesPerSec > 0 && bytesRemaining > 0) {
+      const eta = Math.round(bytesRemaining / bytesPerSec);
+      progressEta.innerText = `Remaining: ${eta}s`;
+    } else {
+      progressEta.innerText = 'Remaining: 0s';
+    }
+  }
+  
+  progressStatus.innerText = `${label} (${chunksLoaded}/${totalChunks} blocks)...`;
+}
+
+function resetTransferState() {
+  isTransferring = false;
+  toggleInputStates(false);
+  progressContainer.classList.add('hidden');
+  receivedChunks = [];
+  fileMetadata = null;
+  expectedTotalChunks = 0;
+  clearSelectedFile();
+}
+
+// --- UI Event Listeners & State Controls ---
+// Canonicalize a room ID so it matches regardless of how the user typed it.
+// Generated codes look like "529-194"; a user may enter "529194", "529 194",
+// etc. A 6-digit code is normalized to "XXX-XXX"; any other value is left as-is
+// (just trimmed) so custom room names still work.
+function normalizeRoomId(raw) {
+  const trimmed = (raw || '').trim();
+  const digits = trimmed.replace(/\D/g, '');
+  if (/^\d{6}$/.test(digits)) {
+    return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+  }
+  return trimmed;
+}
+
+btnCreateRoom.addEventListener('click', () => {
+  // Generate random room code
+  const code = Math.floor(100000 + Math.random() * 900000);
+  const formattedCode = `${String(code).slice(0, 3)}-${String(code).slice(3)}`;
+
+  log(`Requesting connection to room: ${formattedCode}...`, 'system');
+  sendWS({ type: 'join', roomId: formattedCode });
+});
+
+btnJoinRoom.addEventListener('click', () => {
+  const val = normalizeRoomId(inputRoomId.value);
+  if (!val) {
+    alert('Please enter a valid Room ID.');
+    return;
+  }
+  // Reflect the canonical form back to the user so it's clear what they joined.
+  inputRoomId.value = val;
+  sendWS({ type: 'join', roomId: val });
+});
+
+// Pressing Enter in the Room ID field joins, same as clicking the button.
+inputRoomId.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    btnJoinRoom.click();
+  }
+});
+
+btnLeaveRoom.addEventListener('click', () => {
+  if (confirm('Disconnect from current secure room?')) {
+    resetConnection();
+  }
+});
+
+chkVerified.addEventListener('change', () => {
+  if (chkVerified.checked) {
+    log('Security code verified. Notifying peer...', 'success');
+  } else {
+    log('Verification cleared. Notifying peer...', 'system');
+  }
+  // Announce our verification state to the peer over the signaling channel.
+  sendSignal({ type: chkVerified.checked ? 'verified' : 'unverified' });
+  refreshVerificationStatus();
+  // Re-apply lock state (keep everything disabled if a transfer is in flight).
+  toggleInputStates(isTransferring);
+});
+
+// Reflect the combined (local + peer) verification state in the channel status.
+function refreshVerificationStatus() {
+  if (!aesKey) return;
+  if (chkVerified.checked && peerVerified) {
+    textChannelStatus.innerText = 'Both peers verified — secure transfer ready.';
+  } else if (chkVerified.checked && !peerVerified) {
+    textChannelStatus.innerText = 'Waiting for peer to verify the security code...';
+  } else if (!chkVerified.checked && peerVerified) {
+    textChannelStatus.innerText = 'Peer verified. Confirm the code to enable transfers.';
+  } else {
+    textChannelStatus.innerText = 'Verify the security code on both clients to continue.';
+  }
+}
+
+function showConnectionUI(room) {
+  displayRoomId.innerText = room;
+  sectionSetup.classList.add('hidden');
+  sectionConnection.classList.remove('hidden');
+  chkVerified.checked = false;
+  peerVerified = false;
+  // Key exchange (and the fingerprint) only starts once a second peer joins.
+  textChannelStatus.innerText = 'Waiting for the other peer to join this room...';
+}
+
+function toggleInputStates(disable) {
+  btnLeaveRoom.disabled = disable;
+  chkVerified.disabled = disable;
+  btnCancelFile.disabled = disable;
+
+  // File sending is locked while transferring OR until BOTH peers have confirmed
+  // the security code, to prevent transfers over an unverified channel.
+  const lock = disable || !chkVerified.checked || !peerVerified;
+  dropzone.style.pointerEvents = lock ? 'none' : 'auto';
+  dropzone.style.opacity = lock ? '0.5' : '1';
+  btnSendFile.disabled = lock;
+}
+
+function resetConnection() {
+  log('Closing connection. Resetting cryptographic state...', 'system');
+  
+  if (peerConnection) {
+    peerConnection.close();
+    peerConnection = null;
+  }
+  if (dataChannel) {
+    dataChannel.close();
+    dataChannel = null;
+  }
+  
+  myKeyPair = null;
+  peerPublicKey = null;
+  aesKey = null;
+  isInitiator = false;
+  roomId = null;
+  peerVerified = false;
+  
+  displayFingerprint.innerText = '---';
+  textChannelStatus.innerText = 'Securing connection...';
+  
+  sectionConnection.classList.add('hidden');
+  sectionTransfer.classList.add('hidden');
+  progressContainer.classList.add('hidden');
+  sectionSetup.classList.remove('hidden');
+  clearSelectedFile();
+}
+
+// Drag & Drop File Handling
+dropzone.addEventListener('click', () => inputFile.click());
+
+dropzone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropzone.classList.add('dragover');
+});
+
+dropzone.addEventListener('dragleave', () => {
+  dropzone.classList.remove('dragover');
+});
+
+dropzone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropzone.classList.remove('dragover');
+  if (e.dataTransfer.files.length > 0) {
+    handleFileSelect(e.dataTransfer.files[0]);
+  }
+});
+
+inputFile.addEventListener('change', () => {
+  if (inputFile.files.length > 0) {
+    handleFileSelect(inputFile.files[0]);
+  }
+});
+
+function handleFileSelect(file) {
+  selectedFile = file;
+  fileName.innerText = file.name;
+  
+  let sizeText = '';
+  if (file.size > 1024 * 1024) {
+    sizeText = `${(file.size / (1024 * 1024)).toFixed(2)} MB`;
+  } else {
+    sizeText = `${(file.size / 1024).toFixed(1)} KB`;
+  }
+  fileSize.innerText = sizeText;
+  
+  fileDetails.classList.remove('hidden');
+  log(`Selected local file for transfer: ${file.name} (${sizeText})`, 'system');
+}
+
+btnCancelFile.addEventListener('click', clearSelectedFile);
+
+function clearSelectedFile() {
+  selectedFile = null;
+  inputFile.value = '';
+  fileDetails.classList.add('hidden');
+}
+
+btnSendFile.addEventListener('click', sendFile);
+
+// Initialize Client
+window.addEventListener('DOMContentLoaded', () => {
+  if (!isCryptoAvailable()) {
+    const msg = 'Encryption unavailable: this app must be opened over HTTPS or via http://localhost. '
+      + 'If you are testing across devices on a LAN IP, the browser disables the Web Crypto API on insecure origins, '
+      + 'so the security code cannot be generated.';
+    log(msg, 'error');
+    alert(msg);
+    btnCreateRoom.disabled = true;
+    btnJoinRoom.disabled = true;
+    return;
+  }
+  initSignaling();
+});

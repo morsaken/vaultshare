@@ -1,0 +1,22 @@
+{
+  "name": "secure-p2p-share",
+  "version": "1.0.0",
+  "description": "Cryptographically secure P2P file sharing with WebRTC and E2EE",
+  "main": "server.js",
+  "author": {
+    "name": "Orhan POLAT",
+    "email": "me@orhanpolat.com",
+    "url": "https://www.orhanpolat.com"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "5.2.1",
+    "ws": "8.21.0"
+  }
+}
