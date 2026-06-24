@@ -50,6 +50,9 @@ let isTransferring = false;
 let activeSendFile = null;
 // Pending receiver reset; cleared when a back-to-back file starts arriving.
 let receiverResetTimer = null;
+// Serializes async processing of incoming P2P packets so handlers for
+// consecutive messages don't interleave (see setupDataChannel).
+let incomingQueue = Promise.resolve();
 
 // STUN server configurations
 const rtcConfig = {
@@ -464,8 +467,17 @@ function setupDataChannel(channel) {
     log('P2P Data Channel closed.', 'p2p');
   };
   
+  // handleIncomingData is async (it awaits decrypt/hash). Without serializing,
+  // the next message's handler would interleave with the current one — e.g. the
+  // next file's metadata (0x01) resetting receivedChunks/fileMetadata while the
+  // previous file's completion (0x04) is still hashing, causing a checksum
+  // mismatch. Chain the calls so each packet is fully processed in arrival order.
   channel.onmessage = (event) => {
-    handleIncomingData(event.data);
+    // .catch keeps the queue alive if a handler ever rejects, so one bad packet
+    // can't wedge processing of everything after it.
+    incomingQueue = incomingQueue
+      .then(() => handleIncomingData(event.data))
+      .catch((err) => log(`Error processing incoming packet: ${err.message}`, 'error'));
   };
 }
 
