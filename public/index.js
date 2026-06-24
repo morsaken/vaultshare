@@ -14,9 +14,9 @@ const sectionTransfer = document.getElementById('section-transfer');
 const dropzone = document.getElementById('dropzone');
 const inputFile = document.getElementById('input-file');
 const fileDetails = document.getElementById('file-details');
-const fileName = document.getElementById('file-name');
-const fileSize = document.getElementById('file-size');
-const btnCancelFile = document.getElementById('btn-cancel-file');
+const fileList = document.getElementById('file-list');
+const fileListSummary = document.getElementById('file-list-summary');
+const btnClearFiles = document.getElementById('btn-clear-files');
 const btnSendFile = document.getElementById('btn-send-file');
 const progressContainer = document.getElementById('progress-container');
 const progressStatus = document.getElementById('progress-status');
@@ -37,7 +37,7 @@ let myKeyPair = null;
 let peerPublicKey = null;
 let aesKey = null;
 let peerVerified = false;
-let selectedFile = null;
+let selectedFiles = [];
 
 // Transfer state tracking
 let startTime = 0;
@@ -46,6 +46,10 @@ let expectedTotalChunks = 0;
 let receivedChunks = [];
 let fileMetadata = null;
 let isTransferring = false;
+// The file currently being streamed out (used for send-side progress/ETA).
+let activeSendFile = null;
+// Pending receiver reset; cleared when a back-to-back file starts arriving.
+let receiverResetTimer = null;
 
 // STUN server configurations
 const rtcConfig = {
@@ -473,7 +477,7 @@ async function calculateSHA256(arrayBuffer) {
 }
 
 async function sendFile() {
-  if (!selectedFile || !dataChannel || dataChannel.readyState !== 'open' || !aesKey) {
+  if (selectedFiles.length === 0 || !dataChannel || dataChannel.readyState !== 'open' || !aesKey) {
     log('Cannot send: connection not ready.', 'error');
     return;
   }
@@ -489,37 +493,70 @@ async function sendFile() {
     alert('Your peer has not verified the security code yet. Wait until they confirm before sending.');
     return;
   }
-  
+
   isTransferring = true;
   toggleInputStates(true);
   progressContainer.classList.remove('hidden');
-  progressStatus.innerText = 'Calculating SHA-256 checksum...';
+
+  // Snapshot the queue so it can't change mid-transfer.
+  const batch = selectedFiles.slice();
+  log(`Starting transfer of ${batch.length} file(s).`, 'send');
+
+  for (let f = 0; f < batch.length; f++) {
+    if (!isTransferring) return; // Transfer was cancelled
+
+    const ok = await sendSingleFile(batch[f], f, batch.length);
+    if (!ok) return; // Cancelled/aborted mid-file; state already reset.
+  }
+
+  log(`All ${batch.length} file(s) transferred successfully!`, 'send');
+  progressStatus.innerText = 'Transfer Complete!';
+
+  setTimeout(() => {
+    isTransferring = false;
+    activeSendFile = null;
+    toggleInputStates(false);
+    progressContainer.classList.add('hidden');
+    clearSelectedFiles();
+  }, 2000);
+}
+
+// Stream a single file: metadata (0x01) -> chunks (0x02) -> complete (0x04).
+// `fileIndex`/`fileCount` describe this file's place in the batch (for progress
+// labels on both ends). Returns false if the transfer was cancelled/aborted.
+async function sendSingleFile(file, fileIndex, fileCount) {
+  activeSendFile = file;
+  const batchLabel = fileCount > 1 ? `File ${fileIndex + 1}/${fileCount}: ` : '';
+
+  progressStatus.innerText = `${batchLabel}Calculating SHA-256 checksum...`;
   progressPercent.innerText = '0%';
   progressBarFill.style.width = '0%';
-  
-  const fileBytes = await selectedFile.arrayBuffer();
-  
-  log('Generating SHA-256 file checksum for integrity verification...', 'crypto');
+
+  const fileBytes = await file.arrayBuffer();
+
+  log(`Generating SHA-256 file checksum for integrity verification...`, 'crypto');
   const fileHash = await calculateSHA256(fileBytes);
   log(`Checksum derived: ${fileHash}`, 'crypto');
-  
+
   // Header details
   const chunkSize = 60 * 1024; // 60 KB to fit within 64KB WebRTC MTU
-  const totalChunks = Math.ceil(selectedFile.size / chunkSize);
-  
+  const totalChunks = Math.ceil(file.size / chunkSize);
+
   const metadata = {
-    name: selectedFile.name,
-    size: selectedFile.size,
-    type: selectedFile.type || 'application/octet-stream',
+    name: file.name,
+    size: file.size,
+    type: file.type || 'application/octet-stream',
     totalChunks,
-    sha256: fileHash
+    sha256: fileHash,
+    fileIndex,
+    fileCount
   };
-  
+
   // Encrypt and send metadata header packet
   // Structure: [1-byte message type = 0x01] + [12-byte IV] + [ciphertext]
   log(`Sending file metadata: ${metadata.name} (${metadata.size} bytes) in ${totalChunks} chunks.`, 'p2p');
-  progressStatus.innerText = 'Encrypting & sending metadata...';
-  
+  progressStatus.innerText = `${batchLabel}Encrypting & sending metadata...`;
+
   const metadataStr = JSON.stringify(metadata);
   const iv = window.crypto.getRandomValues(new Uint8Array(12));
   const encryptedMeta = await window.crypto.subtle.encrypt(
@@ -527,22 +564,22 @@ async function sendFile() {
     aesKey,
     new TextEncoder().encode(metadataStr)
   );
-  
+
   const metaPacket = new Uint8Array(1 + 12 + encryptedMeta.byteLength);
   metaPacket[0] = 0x01; // type 0x01
   metaPacket.set(iv, 1);
   metaPacket.set(new Uint8Array(encryptedMeta), 13);
-  
+
   dataChannel.send(metaPacket);
-  
+
   // Send file chunks with backpressure
   log('Starting file chunk transmission stream...', 'p2p');
   startTime = Date.now();
   totalBytesTransferred = 0;
-  
+
   const BUFFER_THRESHOLD = 64 * 1024; // 64 KB threshold
   dataChannel.bufferedAmountLowThreshold = BUFFER_THRESHOLD;
-  
+
   let offset = 0;
   for (let i = 0; i < totalChunks; i++) {
     // Backpressure check
@@ -554,19 +591,19 @@ async function sendFile() {
         };
       });
     }
-    
-    if (!isTransferring) return; // Transfer was cancelled
-    
-    const end = Math.min(offset + chunkSize, selectedFile.size);
+
+    if (!isTransferring) return false; // Transfer was cancelled
+
+    const end = Math.min(offset + chunkSize, file.size);
     const chunkBytes = fileBytes.slice(offset, end);
     offset = end;
-    
+
     // Chunk payload: [4-byte sequence index] + [data]
     const payload = new Uint8Array(4 + chunkBytes.byteLength);
     const view = new DataView(payload.buffer);
     view.setUint32(0, i);
     payload.set(new Uint8Array(chunkBytes), 4);
-    
+
     // Encrypt chunk
     const chunkIv = window.crypto.getRandomValues(new Uint8Array(12));
     const encryptedChunk = await window.crypto.subtle.encrypt(
@@ -574,19 +611,19 @@ async function sendFile() {
       aesKey,
       payload
     );
-    
+
     // Packet structure: [1-byte message type = 0x02] + [12-byte IV] + [ciphertext]
     const packet = new Uint8Array(1 + 12 + encryptedChunk.byteLength);
     packet[0] = 0x02; // type 0x02
     packet.set(chunkIv, 1);
     packet.set(new Uint8Array(encryptedChunk), 13);
-    
+
     dataChannel.send(packet);
     totalBytesTransferred += chunkBytes.byteLength;
-    
-    updateProgress(i + 1, totalChunks, 'Uploading');
+
+    updateProgress(i + 1, totalChunks, `${batchLabel}Uploading`);
   }
-  
+
   // Complete message
   log('File transmission stream finished. Sending finalization trigger.', 'p2p');
   const completeIv = window.crypto.getRandomValues(new Uint8Array(12));
@@ -599,18 +636,11 @@ async function sendFile() {
   completePacket[0] = 0x04; // type 0x04
   completePacket.set(completeIv, 1);
   completePacket.set(new Uint8Array(encryptedComplete), 13);
-  
+
   dataChannel.send(completePacket);
-  
-  log(`Transfer of ${selectedFile.name} completed successfully!`, 'send');
-  progressStatus.innerText = 'Transfer Complete!';
-  
-  setTimeout(() => {
-    isTransferring = false;
-    toggleInputStates(false);
-    progressContainer.classList.add('hidden');
-    clearSelectedFile();
-  }, 2000);
+
+  log(`Transfer of ${file.name} completed successfully!`, 'send');
+  return true;
 }
 
 // Send a small encrypted control message over the data channel.
@@ -663,22 +693,29 @@ async function handleIncomingData(arrayBuffer) {
     );
     
     if (type === 0x01) {
-      // File Metadata
+      // File Metadata. A new file may begin before the previous file's 2s
+      // cleanup timer fires, so cancel that pending reset to avoid it wiping
+      // the incoming transfer's state.
+      if (receiverResetTimer !== null) {
+        clearTimeout(receiverResetTimer);
+        receiverResetTimer = null;
+      }
+
       const metaStr = new TextDecoder().decode(decrypted);
       fileMetadata = JSON.parse(metaStr);
-      
+
       log(`Received metadata: ${fileMetadata.name} (${fileMetadata.size} bytes), expecting ${fileMetadata.totalChunks} chunks.`, 'p2p');
       log(`Peer's file SHA-256 checksum: ${fileMetadata.sha256}`, 'crypto');
-      
+
       expectedTotalChunks = fileMetadata.totalChunks;
       receivedChunks = new Array(expectedTotalChunks);
       totalBytesTransferred = 0;
       startTime = Date.now();
       isTransferring = true;
       toggleInputStates(true);
-      
+
       progressContainer.classList.remove('hidden');
-      updateProgress(0, expectedTotalChunks, 'Downloading');
+      updateProgress(0, expectedTotalChunks, receiveLabel());
       
     } else if (type === 0x02) {
       // File Chunk
@@ -691,7 +728,7 @@ async function handleIncomingData(arrayBuffer) {
       totalBytesTransferred += chunkData.byteLength;
       
       const chunksLoaded = receivedChunks.filter(c => c !== undefined).length;
-      updateProgress(chunksLoaded, expectedTotalChunks, 'Downloading');
+      updateProgress(chunksLoaded, expectedTotalChunks, receiveLabel());
       
     } else if (type === 0x04) {
       // File Transfer Complete
@@ -736,8 +773,11 @@ async function handleIncomingData(arrayBuffer) {
         log(`Successfully downloaded and saved: ${fileMetadata.name}`, 'recv');
         progressStatus.innerText = 'Download Successful!';
       }
-      
-      setTimeout(() => {
+
+      // Delay cleanup so the user sees the result; if another file in the batch
+      // arrives first, its 0x01 handler cancels this timer (see above).
+      receiverResetTimer = setTimeout(() => {
+        receiverResetTimer = null;
         resetTransferState();
       }, 2000);
 
@@ -752,6 +792,15 @@ async function handleIncomingData(arrayBuffer) {
     log(`Crypto decryption error during transfer: ${err.message}`, 'error');
     resetTransferState();
   }
+}
+
+// Build the receive-side progress label, including batch position when the
+// peer is sending more than one file.
+function receiveLabel() {
+  if (fileMetadata && fileMetadata.fileCount > 1) {
+    return `File ${fileMetadata.fileIndex + 1}/${fileMetadata.fileCount}: Downloading`;
+  }
+  return 'Downloading';
 }
 
 // Progress metrics updater
@@ -771,7 +820,7 @@ function updateProgress(chunksLoaded, totalChunks, label = 'Transferring') {
     }
     progressSpeed.innerText = speedText;
     
-    const fileTotalSize = fileMetadata ? fileMetadata.size : (selectedFile ? selectedFile.size : 0);
+    const fileTotalSize = fileMetadata ? fileMetadata.size : (activeSendFile ? activeSendFile.size : 0);
     const bytesRemaining = fileTotalSize - totalBytesTransferred;
     if (bytesPerSec > 0 && bytesRemaining > 0) {
       const eta = Math.round(bytesRemaining / bytesPerSec);
@@ -786,12 +835,17 @@ function updateProgress(chunksLoaded, totalChunks, label = 'Transferring') {
 
 function resetTransferState() {
   isTransferring = false;
+  activeSendFile = null;
+  if (receiverResetTimer !== null) {
+    clearTimeout(receiverResetTimer);
+    receiverResetTimer = null;
+  }
   toggleInputStates(false);
   progressContainer.classList.add('hidden');
   receivedChunks = [];
   fileMetadata = null;
   expectedTotalChunks = 0;
-  clearSelectedFile();
+  clearSelectedFiles();
 }
 
 // --- UI Event Listeners & State Controls ---
@@ -882,7 +936,7 @@ function showConnectionUI(room) {
 function toggleInputStates(disable) {
   btnLeaveRoom.disabled = disable;
   chkVerified.disabled = disable;
-  btnCancelFile.disabled = disable;
+  btnClearFiles.disabled = disable;
 
   // File sending is locked while transferring OR until BOTH peers have confirmed
   // the security code, to prevent transfers over an unverified channel.
@@ -918,7 +972,7 @@ function resetConnection() {
   sectionTransfer.classList.add('hidden');
   progressContainer.classList.add('hidden');
   sectionSetup.classList.remove('hidden');
-  clearSelectedFile();
+  clearSelectedFiles();
 }
 
 // Drag & Drop File Handling
@@ -937,37 +991,93 @@ dropzone.addEventListener('drop', (e) => {
   e.preventDefault();
   dropzone.classList.remove('dragover');
   if (e.dataTransfer.files.length > 0) {
-    handleFileSelect(e.dataTransfer.files[0]);
+    handleFilesSelect(e.dataTransfer.files);
   }
 });
 
 inputFile.addEventListener('change', () => {
   if (inputFile.files.length > 0) {
-    handleFileSelect(inputFile.files[0]);
+    handleFilesSelect(inputFile.files);
   }
+  // Allow re-selecting the same file(s) after clearing.
+  inputFile.value = '';
 });
 
-function handleFileSelect(file) {
-  selectedFile = file;
-  fileName.innerText = file.name;
-  
-  let sizeText = '';
-  if (file.size > 1024 * 1024) {
-    sizeText = `${(file.size / (1024 * 1024)).toFixed(2)} MB`;
-  } else {
-    sizeText = `${(file.size / 1024).toFixed(1)} KB`;
+function formatFileSize(bytes) {
+  if (bytes > 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
   }
-  fileSize.innerText = sizeText;
-  
-  fileDetails.classList.remove('hidden');
-  log(`Selected local file for transfer: ${file.name} (${sizeText})`, 'system');
+  return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
-btnCancelFile.addEventListener('click', clearSelectedFile);
+// Append the chosen files to the queue, skipping exact duplicates (same name +
+// size) so re-dropping doesn't double them up.
+function handleFilesSelect(fileList) {
+  let added = 0;
+  for (const file of fileList) {
+    const dupe = selectedFiles.some(f => f.name === file.name && f.size === file.size);
+    if (dupe) continue;
+    selectedFiles.push(file);
+    added++;
+    log(`Selected local file for transfer: ${file.name} (${formatFileSize(file.size)})`, 'system');
+  }
+  if (added > 0) renderFileList();
+}
 
-function clearSelectedFile() {
-  selectedFile = null;
+function renderFileList() {
+  fileList.innerHTML = '';
+
+  if (selectedFiles.length === 0) {
+    fileDetails.classList.add('hidden');
+    return;
+  }
+
+  const totalBytes = selectedFiles.reduce((sum, f) => sum + f.size, 0);
+  fileListSummary.innerText =
+    `${selectedFiles.length} file${selectedFiles.length === 1 ? '' : 's'} selected · ${formatFileSize(totalBytes)}`;
+
+  selectedFiles.forEach((file, index) => {
+    const row = document.createElement('div');
+    row.className = 'file-info-row';
+    row.innerHTML = `
+      <div class="file-info-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
+          <polyline points="13 2 13 9 20 9"/>
+        </svg>
+      </div>
+      <div class="file-info-text">
+        <div class="file-name"></div>
+        <div class="file-size"></div>
+      </div>
+      <button class="btn-close" type="button" aria-label="Remove file">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"/>
+          <line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>`;
+    row.querySelector('.file-name').innerText = file.name;
+    row.querySelector('.file-size').innerText = formatFileSize(file.size);
+    row.querySelector('.btn-close').addEventListener('click', () => removeFile(index));
+    fileList.appendChild(row);
+  });
+
+  fileDetails.classList.remove('hidden');
+}
+
+function removeFile(index) {
+  // Don't allow editing the queue mid-transfer.
+  if (isTransferring) return;
+  selectedFiles.splice(index, 1);
+  renderFileList();
+}
+
+btnClearFiles.addEventListener('click', clearSelectedFiles);
+
+function clearSelectedFiles() {
+  selectedFiles = [];
   inputFile.value = '';
+  fileList.innerHTML = '';
   fileDetails.classList.add('hidden');
 }
 

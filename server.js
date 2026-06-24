@@ -39,7 +39,7 @@ function pruneDeadClients(clients) {
 wss.on('connection', (ws) => {
   let currentRoomId = null;
 
-  ws.on('message', (messageStr) => {
+  ws.on('message', messageStr => {
     try {
       const message = JSON.parse(messageStr);
 
@@ -47,7 +47,7 @@ wss.on('connection', (ws) => {
         case 'join': {
           const { roomId } = message;
 
-          if (!roomId || typeof roomId !== 'string') {
+          if (!roomId || (typeof roomId !== 'string')) {
             ws.send(JSON.stringify({ type: 'error', message: 'Invalid room ID' }));
             return;
           }
@@ -99,7 +99,7 @@ wss.on('connection', (ws) => {
           const clients = rooms.get(currentRoomId);
           const peer = clients.find(client => client !== ws);
 
-          if (peer && peer.readyState === WebSocket.OPEN) {
+          if (peer && (peer.readyState === WebSocket.OPEN)) {
             peer.send(JSON.stringify({ 
               type: 'signal', 
               payload: message.payload 

@@ -94,37 +94,24 @@
         <h2>File Transfer</h2>
         
         <div id="dropzone" class="dropzone">
-          <input type="file" id="input-file" class="hidden">
+          <input type="file" id="input-file" class="hidden" multiple>
           <div class="dropzone-content">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="dropzone-icon">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
             </svg>
-            <p class="dropzone-main-text">Drag & drop file here or <span>browse files</span></p>
+            <p class="dropzone-main-text">Drag & drop files here or <span>browse files</span></p>
             <p class="dropzone-sub-text">Files are encrypted locally in-memory before leaving your device.</p>
           </div>
         </div>
 
         <!-- SELECTED FILE DETAILS -->
         <div id="file-details" class="file-details hidden">
-          <div class="file-info-row">
-            <div class="file-info-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
-                <polyline points="13 2 13 9 20 9"/>
-              </svg>
-            </div>
-            <div class="file-info-text">
-              <div id="file-name" class="file-name">filename.txt</div>
-              <div id="file-size" class="file-size">0 KB</div>
-            </div>
-            <button id="btn-cancel-file" class="btn-close">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="18" y1="6" x2="6" y2="18"/>
-                <line x1="6" y1="6" x2="18" y2="18"/>
-              </svg>
-            </button>
+          <div class="file-list-header">
+            <span id="file-list-summary" class="file-list-summary">0 files selected</span>
+            <button id="btn-clear-files" class="btn-text">Clear all</button>
           </div>
-          <button id="btn-send-file" class="btn btn-primary btn-block">Send Encrypted File</button>
+          <div id="file-list" class="file-list"></div>
+          <button id="btn-send-file" class="btn btn-primary btn-block">Send Encrypted Files</button>
         </div>
 
         <!-- PROGRESS BAR -->
