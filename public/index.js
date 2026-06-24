@@ -512,7 +512,10 @@ async function sendFile() {
 
   // Snapshot the queue so it can't change mid-transfer.
   const batch = selectedFiles.slice();
-  log(`Starting transfer of ${batch.length} file(s).`, 'send');
+  log(`Starting transfer of ${batch.length} file(s):`, 'send');
+  batch.forEach((file, i) => {
+    log(`  ${i + 1}. ${file.name} (${formatFileSize(file.size)})`, 'send');
+  });
 
   for (let f = 0; f < batch.length; f++) {
     if (!isTransferring) return; // Transfer was cancelled
@@ -539,6 +542,10 @@ async function sendFile() {
 async function sendSingleFile(file, fileIndex, fileCount) {
   activeSendFile = file;
   const batchLabel = fileCount > 1 ? `File ${fileIndex + 1}/${fileCount}: ` : '';
+  // Tag every per-file log line so each file in a batch is clearly identifiable.
+  const tag = `[${fileIndex + 1}/${fileCount}] ${file.name}:`;
+
+  log(`${tag} Preparing to send (${formatFileSize(file.size)}).`, 'send');
 
   progressStatus.innerText = `${batchLabel}Calculating SHA-256 checksum...`;
   progressPercent.innerText = '0%';
@@ -546,9 +553,9 @@ async function sendSingleFile(file, fileIndex, fileCount) {
 
   const fileBytes = await file.arrayBuffer();
 
-  log(`Generating SHA-256 file checksum for integrity verification...`, 'crypto');
+  log(`${tag} Generating SHA-256 checksum for integrity verification...`, 'crypto');
   const fileHash = await calculateSHA256(fileBytes);
-  log(`Checksum derived: ${fileHash}`, 'crypto');
+  log(`${tag} Checksum derived: ${fileHash}`, 'crypto');
 
   // Header details
   const chunkSize = 60 * 1024; // 60 KB to fit within 64KB WebRTC MTU
@@ -566,7 +573,7 @@ async function sendSingleFile(file, fileIndex, fileCount) {
 
   // Encrypt and send metadata header packet
   // Structure: [1-byte message type = 0x01] + [12-byte IV] + [ciphertext]
-  log(`Sending file metadata: ${metadata.name} (${metadata.size} bytes) in ${totalChunks} chunks.`, 'p2p');
+  log(`${tag} Sending metadata (${metadata.size} bytes) in ${totalChunks} chunks.`, 'p2p');
   progressStatus.innerText = `${batchLabel}Encrypting & sending metadata...`;
 
   const metadataStr = JSON.stringify(metadata);
@@ -585,7 +592,7 @@ async function sendSingleFile(file, fileIndex, fileCount) {
   dataChannel.send(metaPacket);
 
   // Send file chunks with backpressure
-  log('Starting file chunk transmission stream...', 'p2p');
+  log(`${tag} Starting chunk transmission stream...`, 'p2p');
   startTime = Date.now();
   totalBytesTransferred = 0;
 
@@ -637,7 +644,7 @@ async function sendSingleFile(file, fileIndex, fileCount) {
   }
 
   // Complete message
-  log('File transmission stream finished. Sending finalization trigger.', 'p2p');
+  log(`${tag} Stream finished. Sending finalization trigger.`, 'p2p');
   const completeIv = window.crypto.getRandomValues(new Uint8Array(12));
   const encryptedComplete = await window.crypto.subtle.encrypt(
     { name: 'AES-GCM', iv: completeIv },
@@ -651,7 +658,7 @@ async function sendSingleFile(file, fileIndex, fileCount) {
 
   dataChannel.send(completePacket);
 
-  log(`Transfer of ${file.name} completed successfully!`, 'send');
+  log(`${tag} Transfer completed successfully!`, 'send');
   return true;
 }
 
@@ -716,8 +723,8 @@ async function handleIncomingData(arrayBuffer) {
       const metaStr = new TextDecoder().decode(decrypted);
       fileMetadata = JSON.parse(metaStr);
 
-      log(`Received metadata: ${fileMetadata.name} (${fileMetadata.size} bytes), expecting ${fileMetadata.totalChunks} chunks.`, 'p2p');
-      log(`Peer's file SHA-256 checksum: ${fileMetadata.sha256}`, 'crypto');
+      log(`${recvTag()} Receiving "${fileMetadata.name}" (${fileMetadata.size} bytes) in ${fileMetadata.totalChunks} chunks.`, 'p2p');
+      log(`${recvTag()} Peer's file SHA-256 checksum: ${fileMetadata.sha256}`, 'crypto');
 
       expectedTotalChunks = fileMetadata.totalChunks;
       receivedChunks = new Array(expectedTotalChunks);
@@ -744,34 +751,35 @@ async function handleIncomingData(arrayBuffer) {
       
     } else if (type === 0x04) {
       // File Transfer Complete
-      log('Received finalization trigger. Reassembling file chunks...', 'p2p');
+      const tag = recvTag();
+      log(`${tag} Finalization received. Reassembling "${fileMetadata.name}"...`, 'p2p');
       progressStatus.innerText = 'Reassembling and verifying file...';
-      
+
       // Ensure we have all chunks
       const missingChunks = [];
       for (let i = 0; i < expectedTotalChunks; i++) {
         if (!receivedChunks[i]) missingChunks.push(i);
       }
-      
+
       if (missingChunks.length > 0) {
-        log(`Security/Transfer Error: Missing ${missingChunks.length} chunks. Download aborted.`, 'error');
+        log(`${tag} Security/Transfer Error: Missing ${missingChunks.length} chunks. Download aborted.`, 'error');
         resetTransferState();
         return;
       }
-      
+
       const fileBlob = new Blob(receivedChunks, { type: fileMetadata.type });
       const assembledBuffer = await fileBlob.arrayBuffer();
-      
-      log('Running integrity validation on received file...', 'crypto');
+
+      log(`${tag} Running integrity validation...`, 'crypto');
       const receivedHash = await calculateSHA256(assembledBuffer);
-      log(`Derived checksum: ${receivedHash}`, 'crypto');
-      
+      log(`${tag} Derived checksum: ${receivedHash}`, 'crypto');
+
       if (receivedHash !== fileMetadata.sha256) {
-        log('Security Integrity Error: Checksum mismatch! File has been altered or corrupted.', 'error');
-        alert('Security Integrity Error: Checksum mismatch! Transfer aborted.');
+        log(`${tag} Security Integrity Error: Checksum mismatch! File altered or corrupted.`, 'error');
+        alert(`Security Integrity Error: Checksum mismatch on "${fileMetadata.name}"! Transfer aborted.`);
       } else {
-        log('Integrity verified! File hash matches peer hash perfectly.', 'success');
-        
+        log(`${tag} Integrity verified! File hash matches peer hash perfectly.`, 'success');
+
         // Trigger save download
         const url = URL.createObjectURL(fileBlob);
         const a = document.createElement('a');
@@ -781,8 +789,8 @@ async function handleIncomingData(arrayBuffer) {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        
-        log(`Successfully downloaded and saved: ${fileMetadata.name}`, 'recv');
+
+        log(`${tag} Successfully downloaded and saved: ${fileMetadata.name}`, 'recv');
         progressStatus.innerText = 'Download Successful!';
       }
 
@@ -813,6 +821,13 @@ function receiveLabel() {
     return `File ${fileMetadata.fileIndex + 1}/${fileMetadata.fileCount}: Downloading`;
   }
   return 'Downloading';
+}
+
+// Per-file log prefix for the receive side, e.g. "[2/3] report.pdf:".
+function recvTag() {
+  if (!fileMetadata) return '';
+  const pos = `${(fileMetadata.fileIndex ?? 0) + 1}/${fileMetadata.fileCount ?? 1}`;
+  return `[${pos}] ${fileMetadata.name}:`;
 }
 
 // Progress metrics updater
