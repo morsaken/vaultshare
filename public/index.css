@@ -190,6 +190,7 @@ h1 {
   }
   .divider-text {
     align-self: center;
+    align-items: center;
   }
 }
 
