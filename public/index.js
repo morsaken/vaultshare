@@ -909,6 +909,15 @@ btnJoinRoom.addEventListener('click', () => {
   sendWS({ type: 'join', roomId: val });
 });
 
+// Auto-mask the Room ID into the "000-000" format as the user types: keep only
+// digits, cap at 6, and drop in the hyphen after the third one.
+inputRoomId.addEventListener('input', () => {
+  const digits = inputRoomId.value.replace(/\D/g, '').slice(0, 6);
+  inputRoomId.value = digits.length > 3
+    ? `${digits.slice(0, 3)}-${digits.slice(3)}`
+    : digits;
+});
+
 // Pressing Enter in the Room ID field joins, same as clicking the button.
 inputRoomId.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
