@@ -678,7 +678,18 @@ input[type="text"]:focus {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 1rem;
   margin-bottom: 1rem;
+}
+
+/* Keep the "Clear Log" button on one line and let the heading take the rest. */
+.log-header h2 {
+  margin-bottom: 0;
+}
+
+.log-header .btn-link {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .btn-link {
