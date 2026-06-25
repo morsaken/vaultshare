@@ -200,6 +200,18 @@ h1 {
   .divider-text {
     align-self: center;
   }
+
+  /* Three nested padding layers (container > card > console) squeeze the
+     usable width on small screens — trim each so content gets more room. */
+  .app-container {
+    padding: 1.5rem 0.875rem;
+  }
+  .card {
+    padding: 1.25rem 1rem;
+  }
+  .log-console {
+    padding: 0.75rem;
+  }
 }
 
 .setup-col {
