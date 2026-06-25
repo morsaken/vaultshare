@@ -36,11 +36,19 @@
   padding: 0;
 }
 
+/* overflow-x:hidden must be on html too — on iOS Safari body alone doesn't
+   clip wide absolutely-positioned children (e.g. the glow), causing the page
+   to scroll horizontally and not fit the viewport. */
+html {
+  overflow-x: hidden;
+}
+
 body {
   background-color: var(--bg-dark);
   color: var(--text-primary);
   font-family: var(--font-sans);
   min-height: 100vh;
+  width: 100%;
   display: flex;
   justify-content: center;
   overflow-x: hidden;
@@ -50,11 +58,12 @@ body {
 /* Background decoration glow */
 .background-glow {
   position: absolute;
-  width: 600px;
+  width: min(600px, 100%);
   height: 600px;
   background: radial-gradient(circle, var(--primary-glow) 0%, transparent 70%);
   top: -200px;
-  left: calc(50% - 300px);
+  left: 50%;
+  transform: translateX(-50%);
   z-index: -1;
   pointer-events: none;
   filter: blur(40px);
