@@ -816,15 +816,18 @@ function showToast(body) {
   timer = setTimeout(dismiss, 5000);
 }
 
-// Is the chat panel actually on screen right now (visible tab + shown section +
-// within the viewport)? If so, the user can already see incoming messages.
+// Is the WHOLE chat panel on screen right now (visible tab + shown section +
+// fully within the viewport)? Only then can the user see every incoming message
+// without scrolling, so we suppress the toast. Any part clipped → show the toast.
 function isChatInView() {
   if (document.hidden) return false;
   if (sectionChat.classList.contains('hidden')) return false;
   const rect = sectionChat.getBoundingClientRect();
   const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
-  // Any part of the section intersecting the viewport counts as visible.
-  return rect.bottom > 0 && rect.top < viewportHeight;
+  // If the section is taller than the viewport it can never fit entirely, so
+  // treat it as visible only when it spans the full viewport (nothing more fits).
+  if (rect.height > viewportHeight) return rect.top <= 0 && rect.bottom >= viewportHeight;
+  return rect.top >= 0 && rect.bottom <= viewportHeight;
 }
 
 // Notify on an incoming peer message. Skip the toast when the chat is already
