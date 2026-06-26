@@ -68,6 +68,13 @@
               <input type="text" id="input-room-id" data-i18n-placeholder="setup.placeholder" placeholder="Room ID (e.g. 529-194)" autocomplete="off" spellcheck="false">
               <button id="btn-join-room" class="btn btn-secondary" data-i18n="setup.join">Join</button>
             </div>
+            <button id="btn-scan-qr" class="btn btn-ghost btn-scan" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
+                <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/>
+                <path d="M7 12h10"/>
+              </svg>
+              <span data-i18n="scan.button">Scan QR code</span>
+            </button>
           </div>
         </div>
       </section>
@@ -85,6 +92,11 @@
           <button id="btn-leave-room" class="btn btn-danger btn-sm" data-i18n="conn.disconnect">Disconnect</button>
         </div>
 
+        <div class="room-qr-wrapper">
+          <div id="room-qr" class="room-qr"></div>
+          <p class="room-qr-hint" data-i18n="conn.qrHint">Let the other device scan this to join</p>
+        </div>
+
         <div class="fingerprint-wrapper">
           <div class="fingerprint-title">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-sm">
@@ -98,6 +110,16 @@
           <div class="fingerprint-action">
             <input type="checkbox" id="chk-verified">
             <label for="chk-verified" data-i18n="conn.verifyLabel">I have verified the security code on the other client</label>
+          </div>
+          <div class="verify-badges">
+            <span id="badge-you-verified" class="verify-badge">
+              <span class="verify-dot"></span>
+              <span data-i18n="verify.you">You verified</span>
+            </span>
+            <span id="badge-peer-verified" class="verify-badge">
+              <span class="verify-dot"></span>
+              <span data-i18n="verify.peer">Peer verified</span>
+            </span>
           </div>
         </div>
       </section>
@@ -174,6 +196,25 @@
   <!-- In-app notification toasts -->
   <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="false"></div>
 
+  <!-- QR scanner overlay (hidden until "Scan QR code" is pressed) -->
+  <div id="scanner-overlay" class="scanner-overlay hidden" role="dialog" aria-modal="true">
+    <div class="scanner-box">
+      <div class="scanner-header">
+        <span data-i18n="scan.title">Scan room QR</span>
+        <button id="btn-scan-close" class="btn btn-ghost btn-sm" type="button" data-i18n="scan.cancel">Cancel</button>
+      </div>
+      <div class="scanner-video-wrap">
+        <video id="scanner-video" playsinline muted></video>
+        <div class="scanner-reticle"></div>
+      </div>
+      <p id="scanner-msg" class="scanner-msg" data-i18n="scan.hint">Point the camera at the other device's room QR code.</p>
+    </div>
+  </div>
+
+  <!-- Vendored, self-hosted QR libraries (no third-party/CDN, keeps the app
+       self-contained and private): qrcode-generator (display) + jsQR (decode). -->
+  <script src="vendor/qrcode.js"></script>
+  <script src="vendor/jsQR.js"></script>
   <script src="i18n.js"></script>
   <script src="index.js"></script>
 </body>

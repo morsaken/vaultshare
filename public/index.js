@@ -10,6 +10,8 @@ const textChannelStatus = document.getElementById('text-channel-status');
 const btnLeaveRoom = document.getElementById('btn-leave-room');
 const displayFingerprint = document.getElementById('display-fingerprint');
 const chkVerified = document.getElementById('chk-verified');
+const badgeYouVerified = document.getElementById('badge-you-verified');
+const badgePeerVerified = document.getElementById('badge-peer-verified');
 const sectionTransfer = document.getElementById('section-transfer');
 const dropzone = document.getElementById('dropzone');
 const inputFile = document.getElementById('input-file');
@@ -31,6 +33,12 @@ const chatMessages = document.getElementById('chat-messages');
 const chatForm = document.getElementById('chat-form');
 const chatInput = document.getElementById('chat-input');
 const toastContainer = document.getElementById('toast-container');
+const roomQr = document.getElementById('room-qr');
+const btnScanQr = document.getElementById('btn-scan-qr');
+const scannerOverlay = document.getElementById('scanner-overlay');
+const btnScanClose = document.getElementById('btn-scan-close');
+const scannerVideo = document.getElementById('scanner-video');
+const scannerMsg = document.getElementById('scanner-msg');
 
 // --- State Variables ---
 let ws = null;
@@ -1119,6 +1127,73 @@ inputRoomId.addEventListener('keydown', (e) => {
   }
 });
 
+// --- QR Scanner ---
+// Reads the peer's room QR via the camera (vendored jsQR) and joins the room.
+// Like Web Crypto, getUserMedia only works in a secure context (HTTPS or
+// localhost), which the app already requires.
+let scanStream = null;
+let scanRAF = null;
+const scanCanvas = document.createElement('canvas');
+const scanCtx = scanCanvas.getContext('2d', { willReadFrequently: true });
+
+async function openScanner() {
+  if (typeof jsQR === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+    showToast(t('scan.noCamera'));
+    return;
+  }
+  scannerOverlay.classList.remove('hidden');
+  scannerMsg.innerText = t('scan.hint');
+  try {
+    scanStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' },
+      audio: false,
+    });
+  } catch (err) {
+    log(`Camera access failed: ${err.message}`, 'error');
+    scannerMsg.innerText = t('scan.noCamera');
+    return;
+  }
+  scannerVideo.srcObject = scanStream;
+  await scannerVideo.play().catch(() => {});
+  scanRAF = requestAnimationFrame(scanTick);
+}
+
+function scanTick() {
+  if (!scanStream) return;
+  const w = scannerVideo.videoWidth;
+  const h = scannerVideo.videoHeight;
+  if (scannerVideo.readyState === scannerVideo.HAVE_ENOUGH_DATA && w && h) {
+    scanCanvas.width = w;
+    scanCanvas.height = h;
+    scanCtx.drawImage(scannerVideo, 0, 0, w, h);
+    const img = scanCtx.getImageData(0, 0, w, h);
+    const code = jsQR(img.data, w, h, { inversionAttempts: 'dontInvert' });
+    if (code && code.data) {
+      const room = normalizeRoomId(code.data);
+      closeScanner();
+      if (room) {
+        inputRoomId.value = room;
+        sendWS({ type: 'join', roomId: room });
+      }
+      return;
+    }
+  }
+  scanRAF = requestAnimationFrame(scanTick);
+}
+
+function closeScanner() {
+  if (scanRAF) { cancelAnimationFrame(scanRAF); scanRAF = null; }
+  if (scanStream) {
+    scanStream.getTracks().forEach((track) => track.stop());
+    scanStream = null;
+  }
+  scannerVideo.srcObject = null;
+  scannerOverlay.classList.add('hidden');
+}
+
+btnScanQr.addEventListener('click', openScanner);
+btnScanClose.addEventListener('click', closeScanner);
+
 btnLeaveRoom.addEventListener('click', () => {
   if (confirm(t('confirm.disconnect'))) {
     resetConnection();
@@ -1139,7 +1214,15 @@ chkVerified.addEventListener('change', () => {
 });
 
 // Reflect the combined (local + peer) verification state in the channel status.
+// Light up the "You verified" / "Peer verified" badges to match each side's
+// current verification state.
+function updateVerifyBadges() {
+  badgeYouVerified.classList.toggle('verified', chkVerified.checked);
+  badgePeerVerified.classList.toggle('verified', peerVerified);
+}
+
 function refreshVerificationStatus() {
+  updateVerifyBadges();
   if (!aesKey) return;
   if (chkVerified.checked && peerVerified) {
     textChannelStatus.innerText = t('status.bothVerified');
@@ -1154,12 +1237,29 @@ function refreshVerificationStatus() {
 
 function showConnectionUI(room) {
   displayRoomId.innerText = room;
+  renderRoomQr(room);
   sectionSetup.classList.add('hidden');
   sectionConnection.classList.remove('hidden');
   chkVerified.checked = false;
   peerVerified = false;
+  updateVerifyBadges();
   // Key exchange (and the fingerprint) only starts once a second peer joins.
   textChannelStatus.innerText = t('status.waitingOtherPeer');
+}
+
+// Render the room code as a scannable QR so a phone can join by scanning it.
+// Uses the vendored qrcode-generator (no external/CDN dependency).
+function renderRoomQr(room) {
+  if (!roomQr || typeof qrcode === 'undefined') return;
+  try {
+    const qr = qrcode(0, 'M'); // type 0 = auto-size, error-correction level M
+    qr.addData(room);
+    qr.make();
+    roomQr.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true });
+  } catch (err) {
+    log(`Failed to render room QR: ${err.message}`, 'error');
+    roomQr.innerHTML = '';
+  }
 }
 
 function toggleInputStates(disable) {
@@ -1197,6 +1297,7 @@ function resetSecureSession() {
   aesKey = null;
   peerVerified = false;
   chkVerified.checked = false;
+  updateVerifyBadges();
   incomingQueue = Promise.resolve();
 
   // Wipe transfer/receiver state (received plaintext chunks, metadata, timers,
@@ -1250,9 +1351,11 @@ function resetConnection() {
 
   // Reset the UI back to a clean, unverified state.
   displayRoomId.innerText = '---';
+  if (roomQr) roomQr.innerHTML = '';
   displayFingerprint.innerText = '---';
   textChannelStatus.innerText = t('status.securing');
   chkVerified.checked = false;
+  updateVerifyBadges();
 
   sectionConnection.classList.add('hidden');
   sectionTransfer.classList.add('hidden');

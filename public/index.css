@@ -520,6 +520,50 @@ input[type="text"]:focus {
   user-select: none;
 }
 
+/* Verification status badges (You / Peer) */
+.verify-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+
+.verify-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.8rem;
+  border-radius: 9999px;
+  border: 1px solid var(--border-card);
+  background-color: hsla(223, 20%, 8%, 0.4);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  transition: var(--transition-smooth);
+}
+
+.verify-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  background: transparent;
+  flex-shrink: 0;
+  transition: var(--transition-smooth);
+}
+
+/* Lit-up state once that side has confirmed the code. */
+.verify-badge.verified {
+  color: var(--success);
+  border-color: hsla(142, 70%, 45%, 0.35);
+  background-color: var(--success-glow);
+}
+
+.verify-badge.verified .verify-dot {
+  background: var(--success);
+  box-shadow: 0 0 8px var(--success-glow);
+}
+
 /* Dropzone styling */
 .dropzone {
   border: 2px dashed var(--border-card);
@@ -969,4 +1013,108 @@ input[type="text"]:focus {
 /* Helpers */
 .hidden {
   display: none !important;
+}
+
+/* --- QR code & scanner (room sharing) ----------------------------------- */
+.btn-ghost {
+  background-color: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-card);
+}
+.btn-ghost:hover {
+  background-color: var(--secondary);
+  color: var(--text-primary);
+}
+
+/* "Scan QR code" button sits full-width under the join row */
+.btn-scan {
+  width: 100%;
+  margin-top: 0.5rem;
+}
+
+/* Room QR shown in the active connection card */
+.room-qr-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+.room-qr {
+  background: #ffffff;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  line-height: 0;
+  width: 168px;
+  height: 168px;
+}
+.room-qr svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.room-qr-hint {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  text-align: center;
+  margin: 0;
+}
+
+/* Fullscreen camera scanner overlay */
+.scanner-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: hsla(224, 25%, 4%, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+.scanner-box {
+  width: min(420px, 100%);
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-lg);
+  padding: 1rem;
+  backdrop-filter: blur(12px);
+}
+.scanner-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.scanner-video-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: #000;
+}
+#scanner-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.scanner-reticle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 62%;
+  height: 62%;
+  transform: translate(-50%, -50%);
+  border: 3px solid hsla(0, 0%, 100%, 0.85);
+  border-radius: 18px;
+  box-shadow: 0 0 0 9999px hsla(224, 25%, 4%, 0.35);
+}
+.scanner-msg {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  text-align: center;
+  margin: 0.75rem 0 0;
 }
