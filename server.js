@@ -214,6 +214,17 @@ wss.on('connection', (ws, req) => {
           break;
         }
 
+        case 'leave': {
+          // Explicit leave from the client (peer dropped, or user disconnected).
+          // Without this the socket stays registered in the room even after the
+          // client resets, desyncing server and client: a reconnecting peer gets
+          // paired with the stale slot, and the next join fires a phantom
+          // "peer-left" at the other side.
+          leaveRoom(ws, currentRoomId);
+          currentRoomId = null;
+          break;
+        }
+
         default:
           ws.send(JSON.stringify({ type: 'error', message: 'Unknown message type' }));
       }

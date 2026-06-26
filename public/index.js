@@ -993,6 +993,13 @@ function toggleInputStates(disable) {
 function resetConnection() {
   log('Closing connection. Resetting cryptographic state...', 'system');
 
+  // Tell the signaling server we're leaving so it removes us from the room.
+  // Otherwise the server still considers us a member: a reconnecting peer would
+  // be paired with our stale slot, and our next join would fire a spurious
+  // "peer-left" at the other side (client/server desync). Harmless if we weren't
+  // in a room — the server's leave handler is a no-op then.
+  sendWS({ type: 'leave' });
+
   if (peerConnection) {
     peerConnection.close();
     peerConnection = null;
