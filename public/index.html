@@ -142,6 +142,17 @@
         </div>
       </section>
 
+      <!-- SECURE CHAT (Initially Hidden) -->
+      <section id="section-chat" class="card chat-card hidden">
+        <h2 data-i18n="chat.title">Secure Chat</h2>
+        <p class="chat-desc" data-i18n="chat.desc">Messages are end-to-end encrypted and sent directly to your peer over the P2P channel.</p>
+        <div id="chat-messages" class="chat-messages" aria-live="polite"></div>
+        <form id="chat-form" class="chat-form" autocomplete="off">
+          <input type="text" id="chat-input" class="chat-input" maxlength="2000" data-i18n-placeholder="chat.placeholder" placeholder="Type a message..." autocomplete="off">
+          <button type="submit" id="btn-chat-send" class="btn btn-primary" data-i18n="chat.send">Send</button>
+        </form>
+      </section>
+
       <!-- AUDIT LOG / CRYPTO CONSOLE -->
       <section id="section-logs" class="card log-card">
         <div class="log-header">

@@ -36,6 +36,13 @@ const translations = {
     'transfer.clearAll': 'Clear all',
     'transfer.send': 'Send Encrypted Files',
 
+    'chat.title': 'Secure Chat',
+    'chat.desc': 'Messages are end-to-end encrypted and sent directly to your peer over the P2P channel.',
+    'chat.placeholder': 'Type a message...',
+    'chat.send': 'Send',
+    'chat.you': 'You',
+    'chat.peer': 'Peer',
+
     'log.title': 'Cryptographic Security Audit Log',
     'log.clear': 'Clear Log',
 
@@ -106,6 +113,13 @@ const translations = {
     'transfer.dropSub': 'Dosyalar, cihazınızdan ayrılmadan önce bellekte yerel olarak şifrelenir.',
     'transfer.clearAll': 'Tümünü temizle',
     'transfer.send': 'Şifreli Dosyaları Gönder',
+
+    'chat.title': 'Güvenli Sohbet',
+    'chat.desc': 'Mesajlar uçtan uca şifrelenir ve P2P kanalı üzerinden doğrudan eşinize gönderilir.',
+    'chat.placeholder': 'Bir mesaj yazın...',
+    'chat.send': 'Gönder',
+    'chat.you': 'Siz',
+    'chat.peer': 'Eş',
 
     'log.title': 'Kriptografik Güvenlik Denetim Günlüğü',
     'log.clear': 'Günlüğü Temizle',

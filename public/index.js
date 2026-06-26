@@ -26,6 +26,10 @@ const progressSpeed = document.getElementById('progress-speed');
 const progressEta = document.getElementById('progress-eta');
 const btnClearLogs = document.getElementById('btn-clear-logs');
 const logConsole = document.getElementById('log-console');
+const sectionChat = document.getElementById('section-chat');
+const chatMessages = document.getElementById('chat-messages');
+const chatForm = document.getElementById('chat-form');
+const chatInput = document.getElementById('chat-input');
 
 // --- State Variables ---
 let ws = null;
@@ -464,6 +468,9 @@ function setupWebRTC() {
       log('Direct WebRTC peer connection established!', 'p2p');
       textChannelStatus.innerText = t('status.tunnelActive');
       sectionTransfer.classList.remove('hidden');
+      // Chat rides the same encrypted channel and is available as soon as the
+      // tunnel is up (no file-verification gate), so peers can coordinate.
+      sectionChat.classList.remove('hidden');
       // Start locked: the user must check the verification box before sending.
       toggleInputStates(false);
     } else if (peerConnection.iceConnectionState === 'failed' || peerConnection.iceConnectionState === 'disconnected') {
@@ -727,6 +734,46 @@ async function sendDataChannelControl(typeByte, text) {
   dataChannel.send(packet);
 }
 
+// --- Secure Chat ---
+// Render a chat message. `who` is 'you' or 'peer'. Always uses textContent (not
+// innerHTML) so a peer can never inject HTML/script into our DOM.
+function appendChatMessage(text, who) {
+  const row = document.createElement('div');
+  row.className = `chat-msg chat-msg-${who}`;
+
+  const author = document.createElement('span');
+  author.className = 'chat-author';
+  author.textContent = who === 'you' ? t('chat.you') : t('chat.peer');
+
+  const body = document.createElement('div');
+  body.className = 'chat-bubble';
+  body.textContent = text;
+
+  row.appendChild(author);
+  row.appendChild(body);
+  chatMessages.appendChild(row);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+async function sendChatMessage(text) {
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  if (!dataChannel || dataChannel.readyState !== 'open' || !aesKey) {
+    log('Cannot send chat message: secure channel not ready.', 'error');
+    return;
+  }
+  // Chat shares the file-transfer packet protocol with its own type byte (0x06).
+  await sendDataChannelControl(0x06, trimmed);
+  appendChatMessage(trimmed, 'you');
+}
+
+chatForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const text = chatInput.value;
+  chatInput.value = '';
+  sendChatMessage(text);
+});
+
 // Receive and decrypt data chunks
 async function handleIncomingData(arrayBuffer) {
   const view = new Uint8Array(arrayBuffer);
@@ -736,6 +783,23 @@ async function handleIncomingData(arrayBuffer) {
   
   if (!aesKey) {
     log('Security Error: Received P2P packet but line is not encrypted.', 'error');
+    return;
+  }
+
+  // Chat (0x06) is handled before the file-verification gate so peers can
+  // message as soon as the encrypted tunnel is up. Still E2EE; just not subject
+  // to the "verify before receiving files" lock.
+  if (type === 0x06) {
+    try {
+      const decrypted = await window.crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv },
+        aesKey,
+        ciphertext
+      );
+      appendChatMessage(new TextDecoder().decode(decrypted), 'peer');
+    } catch (err) {
+      log(`Failed to decrypt incoming chat message: ${err.message}`, 'error');
+    }
     return;
   }
 
@@ -1062,9 +1126,11 @@ function resetSecureSession() {
 
   displayFingerprint.innerText = '---';
 
-  // Stay on the connection screen; just hide the transfer panel until the
-  // channel is re-secured, and show that we're waiting for the peer.
+  // Stay on the connection screen; just hide the transfer + chat panels until
+  // the channel is re-secured, and show that we're waiting for the peer. Chat
+  // history is kept so the conversation continues after a reconnect.
   sectionTransfer.classList.add('hidden');
+  sectionChat.classList.add('hidden');
   textChannelStatus.innerText = t('status.peerDisconnected');
 }
 
@@ -1111,6 +1177,9 @@ function resetConnection() {
 
   sectionConnection.classList.add('hidden');
   sectionTransfer.classList.add('hidden');
+  // Fully leaving the room: hide and clear the chat history too.
+  sectionChat.classList.add('hidden');
+  chatMessages.innerHTML = '';
   sectionSetup.classList.remove('hidden');
 }
 
