@@ -816,15 +816,26 @@ function showToast(body) {
   timer = setTimeout(dismiss, 5000);
 }
 
-// Notify on an incoming peer message. Skip the toast while the user is actively
-// typing in the chat (they're already watching it); always flag the tab title
-// when the page is backgrounded so it's noticeable from another tab.
+// Is the chat panel actually on screen right now (visible tab + shown section +
+// within the viewport)? If so, the user can already see incoming messages.
+function isChatInView() {
+  if (document.hidden) return false;
+  if (sectionChat.classList.contains('hidden')) return false;
+  const rect = sectionChat.getBoundingClientRect();
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+  // Any part of the section intersecting the viewport counts as visible.
+  return rect.bottom > 0 && rect.top < viewportHeight;
+}
+
+// Notify on an incoming peer message. Skip the toast when the chat is already
+// visible on screen; always flag the tab title when the page is backgrounded so
+// it's noticeable from another tab.
 function notifyPeerMessage(text) {
   if (document.hidden) {
     unreadCount += 1;
     document.title = `(${unreadCount}) ${t('notify.newMessage')}`;
   }
-  if (document.activeElement !== chatInput) {
+  if (!isChatInView()) {
     showToast(text);
   }
 }
