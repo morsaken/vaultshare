@@ -268,20 +268,26 @@ function initSignaling() {
           
         case 'peer-joined':
           log('Peer connected to room. Initiating key exchange...', 'p2p');
+          // The server tells us our handshake role on every pairing, so a
+          // reconnect after a drop restarts cleanly (no two-non-initiator stall).
+          isInitiator = !!msg.initiator;
           textChannelStatus.innerText = 'Performing key exchange...';
-          
+
           // Generate key pair and send public key to peer
           await generateECDHKeyPair();
           const exportedPub = await window.crypto.subtle.exportKey('raw', myKeyPair.publicKey);
-          sendSignal({ 
-            type: 'ecdh-pub', 
-            key: arrayBufferToBase64(exportedPub) 
+          sendSignal({
+            type: 'ecdh-pub',
+            key: arrayBufferToBase64(exportedPub)
           });
           break;
-          
+
         case 'peer-left':
-          log('Peer disconnected from room. Resetting connection.', 'error');
-          resetConnection();
+          // Peer dropped, but we stay in the room and wait for them to
+          // reconnect. Only the secure session is torn down; when the peer
+          // rejoins, the server re-pairs us and the handshake restarts.
+          log('Peer disconnected. Secure session reset — waiting for peer to reconnect...', 'error');
+          resetSecureSession();
           break;
           
         case 'signal':
@@ -425,6 +431,8 @@ function setupWebRTC() {
   };
   
   peerConnection.oniceconnectionstatechange = () => {
+    // A late event can fire after we've already torn down this connection.
+    if (!peerConnection) return;
     log(`ICE connection state changed: ${peerConnection.iceConnectionState}`, 'p2p');
     if (peerConnection.iceConnectionState === 'connected') {
       log('Direct WebRTC peer connection established!', 'p2p');
@@ -433,8 +441,10 @@ function setupWebRTC() {
       // Start locked: the user must check the verification box before sending.
       toggleInputStates(false);
     } else if (peerConnection.iceConnectionState === 'failed' || peerConnection.iceConnectionState === 'disconnected') {
-      log('WebRTC connection dropped.', 'error');
-      resetConnection();
+      // P2P tunnel dropped — stay in the room and wait for the peer to
+      // reconnect (re-handshake), consistent with the signaling peer-left path.
+      log('WebRTC connection dropped. Waiting for peer to reconnect...', 'error');
+      resetSecureSession();
     }
   };
   
@@ -988,6 +998,42 @@ function toggleInputStates(disable) {
   dropzone.style.pointerEvents = lock ? 'none' : 'auto';
   dropzone.style.opacity = lock ? '0.5' : '1';
   btnSendFile.disabled = lock;
+}
+
+// Peer dropped, but we stay in the room and wait for them to reconnect. This
+// wipes the entire secure session — keypair, derived AES key, verification, and
+// the (now dead) P2P connection — without leaving the room or returning to the
+// setup screen. When the peer rejoins, the server re-pairs us and the handshake
+// runs again from scratch, deriving a fresh key.
+function resetSecureSession() {
+  if (peerConnection) {
+    peerConnection.close();
+    peerConnection = null;
+  }
+  if (dataChannel) {
+    dataChannel.close();
+    dataChannel = null;
+  }
+
+  // Discard all cryptographic material so the next handshake starts clean and no
+  // stale key could ever be reused.
+  myKeyPair = null;
+  peerPublicKey = null;
+  aesKey = null;
+  peerVerified = false;
+  chkVerified.checked = false;
+  incomingQueue = Promise.resolve();
+
+  // Wipe transfer/receiver state (received plaintext chunks, metadata, timers,
+  // selected files, progress bar) and re-evaluate input locks.
+  resetTransferState();
+
+  displayFingerprint.innerText = '---';
+
+  // Stay on the connection screen; just hide the transfer panel until the
+  // channel is re-secured, and show that we're waiting for the peer.
+  sectionTransfer.classList.add('hidden');
+  textChannelStatus.innerText = 'Peer disconnected. Waiting for peer to reconnect...';
 }
 
 function resetConnection() {

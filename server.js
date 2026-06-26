@@ -185,11 +185,16 @@ wss.on('connection', (ws, req) => {
             peerCount: clients.length 
           }));
 
-          // Notify the other peer that someone joined
+          // Notify both peers that the room is now paired. The peer already
+          // waiting in the room (clients[0]) drives the handshake as initiator;
+          // the one that just joined answers. Assigning the role here (rather
+          // than once at join time) keeps it correct across reconnects: whoever
+          // is already present when someone (re)joins becomes the initiator, so
+          // the handshake never deadlocks with two non-initiators.
           if (clients.length === MAX_PEERS) {
-            const peer = clients[0] === ws ? clients[1] : clients[0];
-            peer.send(JSON.stringify({ type: 'peer-joined' }));
-            ws.send(JSON.stringify({ type: 'peer-joined' }));
+            const existingPeer = clients[0] === ws ? clients[1] : clients[0];
+            existingPeer.send(JSON.stringify({ type: 'peer-joined', initiator: true }));
+            ws.send(JSON.stringify({ type: 'peer-joined', initiator: false }));
           }
 
           break;
