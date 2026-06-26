@@ -992,7 +992,7 @@ function toggleInputStates(disable) {
 
 function resetConnection() {
   log('Closing connection. Resetting cryptographic state...', 'system');
-  
+
   if (peerConnection) {
     peerConnection.close();
     peerConnection = null;
@@ -1001,22 +1001,32 @@ function resetConnection() {
     dataChannel.close();
     dataChannel = null;
   }
-  
+
+  // Wipe all cryptographic material and session identity so nothing carries
+  // over into the next room/peer.
   myKeyPair = null;
   peerPublicKey = null;
   aesKey = null;
   isInitiator = false;
   roomId = null;
   peerVerified = false;
-  
+
+  // Drop any in-flight packet processing chain.
+  incomingQueue = Promise.resolve();
+
+  // Wipe transfer/receiver state (received plaintext chunks, metadata,
+  // pending timers, selected files, progress bar).
+  resetTransferState();
+
+  // Reset the UI back to a clean, unverified state.
+  displayRoomId.innerText = '---';
   displayFingerprint.innerText = '---';
   textChannelStatus.innerText = 'Securing connection...';
-  
+  chkVerified.checked = false;
+
   sectionConnection.classList.add('hidden');
   sectionTransfer.classList.add('hidden');
-  progressContainer.classList.add('hidden');
   sectionSetup.classList.remove('hidden');
-  clearSelectedFiles();
 }
 
 // Drag & Drop File Handling
