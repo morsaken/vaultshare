@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VaultShare — Gizlilik Politikası</title>
+  <meta name="description" content="Uçtan uca şifreli, eşler arası dosya paylaşım uygulaması VaultShare için gizlilik politikası.">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0; padding: 2.5rem 1.25rem; background: #0b1220; color: #e6edf6;
+      font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    main { max-width: 760px; margin: 0 auto; }
+    h1 { font-size: 1.9rem; margin: 0 0 .25rem; }
+    h2 { font-size: 1.25rem; margin: 2rem 0 .5rem; color: #9ecbff; }
+    .meta { color: #9aa7b8; font-size: .9rem; margin-bottom: 1.5rem; }
+    a { color: #7ab7ff; }
+    strong { color: #fff; }
+    hr { border: none; border-top: 1px solid #22304a; margin: 2.5rem 0 1.25rem; }
+    footer { color: #9aa7b8; font-size: .9rem; font-style: italic; }
+    code { background: #111c30; padding: .1rem .35rem; border-radius: 4px; }
+    .lang-nav { font-size: .9rem; color: #9aa7b8; margin: 0 0 1.5rem; }
+    .lang-nav strong { color: #fff; }
+  </style>
+</head>
+<body>
+<main>
+  <p class="lang-nav"><a href="privacy-policy.html">English</a> · <strong>Türkçe</strong></p>
+  <h1>VaultShare Gizlilik Politikası</h1>
+  <p class="meta"><strong>Yürürlük tarihi:</strong> 26 Haziran 2026 &nbsp;·&nbsp; <strong>Son güncelleme:</strong> 26 Haziran 2026</p>
+
+  <p>VaultShare (&ldquo;uygulama&rdquo;, &ldquo;biz&rdquo;), uçtan uca şifreli, eşler arası bir
+  dosya paylaşım uygulamasıdır. Bu politika, uygulamanın hangi bilgileri işleyip işlemediğini açıklar.
+  Kısacası: <strong>VaultShare kişisel verilerinizi toplamaz, saklamaz, satmaz veya paylaşmaz ve
+  dosyalarınız hiçbir zaman sunucularımızdan geçmez.</strong></p>
+
+  <h2>1. Hesap yok, takip yok</h2>
+  <ul>
+    <li>VaultShare'de <strong>kullanıcı hesabı, oturum açma veya kayıt bulunmaz</strong>.</li>
+    <li>Herhangi bir analiz, reklam, takip veya profilleme SDK'sı <strong>içermez</strong>.</li>
+    <li>Adınızı, e-postanızı, telefon numaranızı, kişilerinizi, konumunuzu veya cihaz tanımlayıcılarınızı <strong>toplamaz</strong>.</li>
+  </ul>
+
+  <h2>2. Dosyalarınız</h2>
+  <p>Gönderdiğiniz dosyalar, şifreli bir WebRTC veri kanalı üzerinden <strong>doğrudan iki cihaz
+  arasında</strong> aktarılır. Ayrıntılı olarak:</p>
+  <ul>
+    <li>Paylaşılan bir oturum anahtarı, cihaz üzerinde <strong>ECDH (P-256) anahtar değişimi</strong> ve <strong>HKDF-SHA256</strong> kullanılarak türetilir.</li>
+    <li>Her dosya parçalara bölünür; her parça <strong>AES-GCM-256</strong> ile şifrelenir ve varışta bir <strong>SHA-256</strong> sağlama toplamıyla doğrulanır.</li>
+    <li><strong>Dosya içerikleri, işlettiğimiz hiçbir sunucuya yüklenmez, orada işlenmez veya saklanmaz.</strong> Yalnızca gönderen cihazda, alıcı cihazda ve aralarında (şifreli olarak) aktarım sırasında bulunur.</li>
+    <li>Dosyalarınıza erişme, onları kurtarma veya şifresini çözme <strong>yeteneğimiz yoktur</strong>.</li>
+  </ul>
+
+  <h2>3. Sinyalleşme sunucusu</h2>
+  <p>İki cihazın birbirini bulabilmesi için uygulama, sizin veya dağıtıcınız tarafından seçilen bir
+  <strong>sinyalleşme sunucusuna</strong> (hafif bir aktarıcı) bağlanır. Sinyalleşme sunucusu:</p>
+  <ul>
+    <li>İki eşin doğrudan bir bağlantı açmak için gereken bilgileri (oda kodu ve her eşin <strong>açık ECDH anahtarı</strong> ile ağ adayları dâhil olmak üzere açık bağlantı ayrıntıları) değiş tokuş etmesine yardımcı olur.</li>
+    <li>Dosya içeriklerinizi <strong>asla almaz</strong> ve özel anahtarlarınızı ya da türetilen oturum anahtarını <strong>asla almaz.</strong></li>
+    <li>Bağlantıyı yönlendirmek için teknik olarak gerekli olduğundan, bağlanan cihazların <strong>IP adresini</strong> ve kısa ömürlü <strong>oda kodunu</strong> zorunlu olarak görür. Bu bağlantı meta verisi yalnızca oturumu kurmak için kullanılır; sizi tanımlamak veya profillemek için tarafımızca kullanılmaz.</li>
+  </ul>
+  <p>Uygulamayı <strong>kendi barındırdığınız</strong> bir sinyalleşme sunucusuna yönlendirirseniz, o sunucu
+  sizin (ya da onu işleten kişi) tarafından işletilir ve bağlantı meta verisini nasıl ele aldığı o işletmecinin
+  sorumluluğundadır.</p>
+
+  <h2>4. STUN / NAT geçişi</h2>
+  <p>Farklı ağlar arasında doğrudan bir bağlantı kurmak için uygulama, herkese açık <strong>STUN
+  sunucularını</strong> (ör. Google'ın herkese açık STUN hizmeti) kullanır. Bir STUN sunucusu, eşlerin bir ağ
+  yolu bulmasına yardımcı olmak için cihazın <strong>açık IP adresini</strong> öğrenir. Dosya içeriklerini veya
+  şifreleme anahtarlarını almaz. STUN sunucuları, kendi gizlilik politikaları kapsamında üçüncü taraflarca
+  işletilir.</p>
+
+  <h2>5. Cihaz izinleri</h2>
+  <ul>
+    <li><strong>İnternet / Ağ durumu</strong> — sinyalleşme sunucusuna ve diğer eşe bağlanmak için gereklidir.</li>
+    <li><strong>Kamera / Mikrofon</strong> — bu izinler, temeldeki WebRTC kitaplığı (<code>react-native-webrtc</code>)
+    tarafından bildirilir. <strong>VaultShare ses veya video kaydetmez, yakalamaz, iletmez veya kullanmaz.</strong>
+    Uygulama tarafından hiçbir zaman kamera veya mikrofon verisine erişilmez.</li>
+  </ul>
+  <p>İzinleri cihazınızın sistem ayarlarından dilediğiniz zaman gözden geçirebilir ve iptal edebilirsiniz.</p>
+
+  <h2>6. Veri paylaşımı ve satışı</h2>
+  <p>Hiçbir kişisel veriyi üçüncü taraflarla <strong>satmaz, kiralamaz veya paylaşmayız</strong>; çünkü hiçbirini
+  toplamıyoruz. Devreye giren herhangi bir reklam ağı, veri simsarı veya analiz sağlayıcısı yoktur.</p>
+
+  <h2>7. Çocukların gizliliği</h2>
+  <p>VaultShare genel amaçlı bir araçtır ve çocuklara yönelik değildir. Çocuklar dâhil hiç kimseden bilerek
+  herhangi bir bilgi toplamayız.</p>
+
+  <h2>8. Güvenlik</h2>
+  <p>VaultShare, gizliliğin bize güvenmeye bağlı olmayacağı şekilde tasarlanmıştır. Uçtan uca şifreleme
+  anahtarları yalnızca katılan cihazlarda üretilir ve tutulur; ayrıca herhangi bir dosya aktarılmadan önce
+  kullanıcıların araya giren biri (man-in-the-middle) olmadığını teyit edebilmesi için her iki ekranda da bir
+  <strong>güvenlik doğrulama kodu</strong> gösterilir. Hiçbir sistem kusursuz şekilde güvenli değildir; ancak
+  tasarımı gereği, dosyalarınızı okumamızı — ya da altyapımızı ele geçiren bir saldırganın okumasını —
+  sağlayacak verileri veya anahtarları asla elimizde tutmayız.</p>
+
+  <h2>9. Bu politikadaki değişiklikler</h2>
+  <p>Bu politikayı zaman zaman güncelleyebiliriz. Önemli değişiklikler, yukarıdaki &ldquo;Son güncelleme&rdquo;
+  tarihi güncellenerek ve uygun olduğunda uygulama içinde veya mağaza sayfasında belirtilerek yansıtılır.</p>
+
+  <h2>10. İletişim</h2>
+  <ul>
+    <li><strong>E-posta:</strong> <a href="mailto:orhanp@gmail.com">orhanp@gmail.com</a></li>
+    <li><strong>Web sitesi:</strong> <a href="https://www.orhanpolat.com">https://www.orhanpolat.com</a></li>
+  </ul>
+
+  <hr>
+  <footer>VaultShare — uçtan uca şifreli, eşler arası dosya paylaşımı. Dosyalarınız size ait kalır.</footer>
+</main>
+</body>
+</html>

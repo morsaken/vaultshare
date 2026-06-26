@@ -30,6 +30,7 @@ const sectionChat = document.getElementById('section-chat');
 const chatMessages = document.getElementById('chat-messages');
 const chatForm = document.getElementById('chat-form');
 const chatInput = document.getElementById('chat-input');
+const toastContainer = document.getElementById('toast-container');
 
 // --- State Variables ---
 let ws = null;
@@ -774,6 +775,68 @@ chatForm.addEventListener('submit', (e) => {
   sendChatMessage(text);
 });
 
+// --- In-app notifications ---
+let unreadCount = 0;
+
+// Pop a transient toast. `body` is peer-controlled, so it's set via textContent
+// (never innerHTML). Clicking it jumps to the chat. Auto-dismisses after 5s.
+function showToast(body) {
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+
+  const title = document.createElement('div');
+  title.className = 'toast-title';
+  title.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>';
+  const titleText = document.createElement('span');
+  titleText.textContent = t('notify.newMessage');
+  title.appendChild(titleText);
+
+  const bodyEl = document.createElement('div');
+  bodyEl.className = 'toast-body';
+  bodyEl.textContent = body;
+
+  toast.appendChild(title);
+  toast.appendChild(bodyEl);
+
+  let timer;
+  const dismiss = () => {
+    clearTimeout(timer);
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 300);
+  };
+  toast.addEventListener('click', () => {
+    sectionChat.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    chatInput.focus();
+    dismiss();
+  });
+
+  toastContainer.appendChild(toast);
+  // Next frame so the CSS transition runs from the off-screen state.
+  requestAnimationFrame(() => toast.classList.add('show'));
+  timer = setTimeout(dismiss, 5000);
+}
+
+// Notify on an incoming peer message. Skip the toast while the user is actively
+// typing in the chat (they're already watching it); always flag the tab title
+// when the page is backgrounded so it's noticeable from another tab.
+function notifyPeerMessage(text) {
+  if (document.hidden) {
+    unreadCount += 1;
+    document.title = `(${unreadCount}) ${t('notify.newMessage')}`;
+  }
+  if (document.activeElement !== chatInput) {
+    showToast(text);
+  }
+}
+
+// Clear the unread tab-title badge once the user looks at the page again.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && unreadCount > 0) {
+    unreadCount = 0;
+    document.title = t('meta.title');
+  }
+});
+
 // Receive and decrypt data chunks
 async function handleIncomingData(arrayBuffer) {
   const view = new Uint8Array(arrayBuffer);
@@ -796,7 +859,9 @@ async function handleIncomingData(arrayBuffer) {
         aesKey,
         ciphertext
       );
-      appendChatMessage(new TextDecoder().decode(decrypted), 'peer');
+      const text = new TextDecoder().decode(decrypted);
+      appendChatMessage(text, 'peer');
+      notifyPeerMessage(text);
     } catch (err) {
       log(`Failed to decrypt incoming chat message: ${err.message}`, 'error');
     }

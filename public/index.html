@@ -6,6 +6,7 @@
   <title>VaultShare | Highly Secure E2EE P2P File Transfer</title>
   <meta name="description" content="Secure, end-to-end encrypted peer-to-peer file sharing protocol running directly in your browser. Powered by WebRTC and Web Crypto API.">
   <!-- Favicons / app icons -->
+  <link rel="icon" href="favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
   <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
@@ -169,6 +170,9 @@
       <p data-i18n="footer.text">All encryption keys and data transfers are ephemeral. No files ever touch our servers.</p>
     </footer>
   </div>
+
+  <!-- In-app notification toasts -->
+  <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="false"></div>
 
   <script src="i18n.js"></script>
   <script src="index.js"></script>

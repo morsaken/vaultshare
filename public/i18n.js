@@ -42,6 +42,7 @@ const translations = {
     'chat.send': 'Send',
     'chat.you': 'You',
     'chat.peer': 'Peer',
+    'notify.newMessage': 'New message from peer',
 
     'log.title': 'Cryptographic Security Audit Log',
     'log.clear': 'Clear Log',
@@ -120,6 +121,7 @@ const translations = {
     'chat.send': 'Gönder',
     'chat.you': 'Siz',
     'chat.peer': 'Eş',
+    'notify.newMessage': 'Eşten yeni mesaj',
 
     'log.title': 'Kriptografik Güvenlik Denetim Günlüğü',
     'log.clear': 'Günlüğü Temizle',
