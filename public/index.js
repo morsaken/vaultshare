@@ -54,11 +54,19 @@ let receiverResetTimer = null;
 // consecutive messages don't interleave (see setupDataChannel).
 let incomingQueue = Promise.resolve();
 
-// STUN server configurations
+// ICE server configuration.
+// STUN handles direct paths (same Wi-Fi/LAN, typical home routers). TURN (a
+// relay) is needed when a peer is behind a restrictive/symmetric NAT — carrier
+// CGNAT, corporate Wi-Fi, or an Android emulator's double NAT — where ICE
+// otherwise stalls in "checking" and fails. TURN only relays the already
+// end-to-end-encrypted packets, so it never sees keys or file contents.
+// For production, run your own TURN (coturn) or use a provider, then uncomment
+// and fill in below — keep this in sync with the mobile client's ICE_SERVERS.
 const rtcConfig = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' }
+    // ,{ urls: 'turn:turn.example.com:3478', username: 'YOUR_TURN_USERNAME', credential: 'YOUR_TURN_CREDENTIAL' }
   ]
 };
 

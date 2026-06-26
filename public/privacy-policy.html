@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VaultShare — Privacy Policy</title>
+  <meta name="description" content="Privacy policy for VaultShare, an end-to-end encrypted peer-to-peer file sharing app.">
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0; padding: 2.5rem 1.25rem; background: #0b1220; color: #e6edf6;
+      font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    main { max-width: 760px; margin: 0 auto; }
+    h1 { font-size: 1.9rem; margin: 0 0 .25rem; }
+    h2 { font-size: 1.25rem; margin: 2rem 0 .5rem; color: #9ecbff; }
+    .meta { color: #9aa7b8; font-size: .9rem; margin-bottom: 1.5rem; }
+    a { color: #7ab7ff; }
+    strong { color: #fff; }
+    hr { border: none; border-top: 1px solid #22304a; margin: 2.5rem 0 1.25rem; }
+    footer { color: #9aa7b8; font-size: .9rem; font-style: italic; }
+    code { background: #111c30; padding: .1rem .35rem; border-radius: 4px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Privacy Policy for VaultShare</h1>
+  <p class="meta"><strong>Effective date:</strong> 26 June 2026 &nbsp;·&nbsp; <strong>Last updated:</strong> 26 June 2026</p>
+
+  <p>VaultShare (&ldquo;the app&rdquo;, &ldquo;we&rdquo;, &ldquo;us&rdquo;) is an end-to-end encrypted,
+  peer-to-peer file-sharing application. This policy explains what information the app does and does not
+  handle. The short version: <strong>VaultShare does not collect, store, sell, or share your personal data,
+  and your files never pass through our servers.</strong></p>
+
+  <h2>1. No accounts, no tracking</h2>
+  <ul>
+    <li>VaultShare has <strong>no user accounts, logins, or registration</strong>.</li>
+    <li>We do <strong>not</strong> include any analytics, advertising, tracking, or profiling SDKs.</li>
+    <li>We do <strong>not</strong> collect your name, email, phone number, contacts, location, or device identifiers.</li>
+  </ul>
+
+  <h2>2. Your files</h2>
+  <p>Files you send are transferred <strong>directly between the two devices</strong> over an encrypted
+  WebRTC data channel. Specifically:</p>
+  <ul>
+    <li>A shared session key is derived on-device using an <strong>ECDH (P-256) key exchange</strong> and <strong>HKDF-SHA256</strong>.</li>
+    <li>Every file is split into chunks; each chunk is encrypted with <strong>AES-GCM-256</strong> and verified with a <strong>SHA-256</strong> checksum on arrival.</li>
+    <li><strong>File contents are never uploaded to, processed by, or stored on any server we operate.</strong> They exist only on the sending device, the receiving device, and in transit (encrypted) between them.</li>
+    <li>We have <strong>no ability to access, recover, or decrypt</strong> your files.</li>
+  </ul>
+
+  <h2>3. The signaling server</h2>
+  <p>To let two devices discover each other, the app connects to a <strong>signaling server</strong> (a
+  lightweight relay) chosen by you or your distributor. The signaling server:</p>
+  <ul>
+    <li>Helps the two peers exchange the information needed to open a direct connection (room code and public connection details, including each peer&rsquo;s <strong>public ECDH key</strong> and network candidates).</li>
+    <li><strong>Never receives your file contents</strong> and <strong>never receives your private keys or the derived session key.</strong></li>
+    <li>Necessarily observes the <strong>IP address</strong> of connecting devices and the short-lived <strong>room code</strong>, as is technically required to route the connection. This connection metadata is used only to establish the session and is not used by us to identify or profile you.</li>
+  </ul>
+  <p>If you point the app at a <strong>self-hosted</strong> signaling server, that server is operated by you
+  (or whoever runs it), and its handling of connection metadata is governed by that operator.</p>
+
+  <h2>4. STUN / NAT traversal</h2>
+  <p>To establish a direct connection across different networks, the app uses public <strong>STUN servers</strong>
+  (e.g. Google&rsquo;s public STUN service). A STUN server learns the device&rsquo;s <strong>public IP address</strong>
+  in order to help peers find a network path. It does not receive file contents or encryption keys. STUN servers
+  are operated by third parties under their own privacy policies.</p>
+
+  <h2>5. Device permissions</h2>
+  <ul>
+    <li><strong>Internet / Network state</strong> — required to connect to the signaling server and the other peer.</li>
+    <li><strong>Camera / Microphone</strong> — these permissions are declared by the underlying WebRTC library
+    (<code>react-native-webrtc</code>). <strong>VaultShare does not record, capture, transmit, or use audio or
+    video.</strong> No camera or microphone data is ever accessed by the app.</li>
+  </ul>
+  <p>You can review and revoke permissions at any time in your device&rsquo;s system settings.</p>
+
+  <h2>6. Data sharing and sale</h2>
+  <p>We do <strong>not</strong> sell, rent, or share any personal data with third parties, because we do not
+  collect any. There is no advertising network, data broker, or analytics provider involved.</p>
+
+  <h2>7. Children&rsquo;s privacy</h2>
+  <p>VaultShare is a general-purpose utility and is not directed at children. We do not knowingly collect any
+  information from anyone, including children.</p>
+
+  <h2>8. Security</h2>
+  <p>VaultShare is designed so that confidentiality does not depend on trusting us. End-to-end encryption keys
+  are generated and held only on the participating devices, and a <strong>security verification code</strong> is
+  shown on both screens so users can confirm there is no man-in-the-middle before any file is transferred. No
+  system is perfectly secure, but by design we never hold the data or keys that would let us — or an attacker
+  compromising our infrastructure — read your files.</p>
+
+  <h2>9. Changes to this policy</h2>
+  <p>We may update this policy from time to time. Material changes will be reflected by updating the
+  &ldquo;Last updated&rdquo; date above and, where appropriate, within the app or its store listing.</p>
+
+  <h2>10. Contact</h2>
+  <ul>
+    <li><strong>Email:</strong> <a href="mailto:orhanp@gmail.com">orhanp@gmail.com</a></li>
+    <li><strong>Website:</strong> <a href="https://www.orhanpolat.com">https://www.orhanpolat.com</a></li>
+  </ul>
+
+  <hr>
+  <footer>VaultShare — end-to-end encrypted, peer-to-peer file sharing. Your files stay yours.</footer>
+</main>
+</body>
+</html>
