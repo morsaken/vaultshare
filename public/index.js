@@ -232,21 +232,18 @@ function initSignaling() {
   const wsUrl = `${protocol}//${window.location.host}`;
   
   log(`Connecting to signaling server at ${wsUrl}...`, 'system');
-  connectionBadge.className = 'badge badge-connecting';
-  connectionBadge.innerText = 'Connecting...';
-  
+
   ws = new WebSocket(wsUrl);
-  
+  updateBadge();
+
   ws.onopen = () => {
     log('Signaling server connected.', 'system');
-    connectionBadge.className = 'badge badge-connected';
-    connectionBadge.innerText = 'Online';
+    updateBadge();
   };
-  
+
   ws.onclose = () => {
     log('Signaling server disconnected. Reconnecting in 3s...', 'system');
-    connectionBadge.className = 'badge badge-disconnected';
-    connectionBadge.innerText = 'Offline';
+    updateBadge();
     setTimeout(initSignaling, 3000);
   };
   
@@ -271,7 +268,7 @@ function initSignaling() {
           // The server tells us our handshake role on every pairing, so a
           // reconnect after a drop restarts cleanly (no two-non-initiator stall).
           isInitiator = !!msg.initiator;
-          textChannelStatus.innerText = 'Performing key exchange...';
+          textChannelStatus.innerText = t('status.keyExchange');
 
           // Generate key pair and send public key to peer
           await generateECDHKeyPair();
@@ -296,7 +293,7 @@ function initSignaling() {
           
         case 'error':
           log(`Server error: ${msg.message}`, 'error');
-          alert(`Server error: ${msg.message}`);
+          alert(t('alert.serverError', { msg: msg.message }));
           // Only tear down if we actually have an active session. Join-time
           // errors (e.g. "Room is full") happen before any connection exists,
           // so resetting would needlessly bounce the user around.
@@ -321,6 +318,35 @@ function sendSignal(payload) {
   sendWS({ type: 'signal', payload });
 }
 
+// Set the connection badge from the current WebSocket state (and current
+// language). Centralized so a language switch can re-render it correctly.
+function updateBadge() {
+  const state = ws ? ws.readyState : WebSocket.CLOSED;
+  if (state === WebSocket.OPEN) {
+    connectionBadge.className = 'badge badge-connected';
+    connectionBadge.innerText = t('badge.online');
+  } else if (state === WebSocket.CONNECTING) {
+    connectionBadge.className = 'badge badge-connecting';
+    connectionBadge.innerText = t('badge.connecting');
+  } else {
+    connectionBadge.className = 'badge badge-disconnected';
+    connectionBadge.innerText = t('badge.offline');
+  }
+}
+
+// When the language changes, re-render the dynamic, state-derived text that
+// isn't covered by the static [data-i18n] sweep (badge, channel status, file
+// summary). Transient progress text updates on its next tick.
+window.addEventListener('vaultshare:langchange', () => {
+  updateBadge();
+  if (aesKey) {
+    refreshVerificationStatus();
+  } else if (roomId) {
+    textChannelStatus.innerText = t('status.waitingOtherPeer');
+  }
+  if (selectedFiles.length) renderFileList();
+});
+
 // Handle incoming WebRTC/ECDH signaling
 async function handleSignal(payload) {
   if (payload.type === 'ecdh-pub') {
@@ -337,7 +363,7 @@ async function handleSignal(payload) {
     }
     
     await deriveSessionKey(payload.key);
-    textChannelStatus.innerText = 'Fingerprint code generated. Verify line security.';
+    textChannelStatus.innerText = t('status.fingerprintReady');
     
     // Now that the line is secure, the initiator creates the WebRTC offer
     if (isInitiator) {
@@ -436,7 +462,7 @@ function setupWebRTC() {
     log(`ICE connection state changed: ${peerConnection.iceConnectionState}`, 'p2p');
     if (peerConnection.iceConnectionState === 'connected') {
       log('Direct WebRTC peer connection established!', 'p2p');
-      textChannelStatus.innerText = 'P2P Tunnel active';
+      textChannelStatus.innerText = t('status.tunnelActive');
       sectionTransfer.classList.remove('hidden');
       // Start locked: the user must check the verification box before sending.
       toggleInputStates(false);
@@ -514,13 +540,13 @@ async function sendFile() {
 
   if (!chkVerified.checked) {
     log('Send blocked: security code not verified.', 'error');
-    alert('Please verify the security code with your peer before sending files.');
+    alert(t('alert.verifyBeforeSend'));
     return;
   }
 
   if (!peerVerified) {
     log('Send blocked: peer has not verified the security code.', 'error');
-    alert('Your peer has not verified the security code yet. Wait until they confirm before sending.');
+    alert(t('alert.peerNotVerified'));
     return;
   }
 
@@ -543,7 +569,7 @@ async function sendFile() {
   }
 
   log(`All ${batch.length} file(s) transferred successfully!`, 'send');
-  progressStatus.innerText = 'Transfer Complete!';
+  progressStatus.innerText = t('progress.complete');
 
   setTimeout(() => {
     isTransferring = false;
@@ -559,13 +585,15 @@ async function sendFile() {
 // labels on both ends). Returns false if the transfer was cancelled/aborted.
 async function sendSingleFile(file, fileIndex, fileCount) {
   activeSendFile = file;
-  const batchLabel = fileCount > 1 ? `File ${fileIndex + 1}/${fileCount}: ` : '';
+  const batchLabel = fileCount > 1
+    ? t('progress.batchLabel', { index: fileIndex + 1, count: fileCount })
+    : '';
   // Tag every per-file log line so each file in a batch is clearly identifiable.
   const tag = `[${fileIndex + 1}/${fileCount}] ${file.name}:`;
 
   log(`${tag} Preparing to send (${formatFileSize(file.size)}).`, 'send');
 
-  progressStatus.innerText = `${batchLabel}Calculating SHA-256 checksum...`;
+  progressStatus.innerText = `${batchLabel}${t('progress.checksum')}`;
   progressPercent.innerText = '0%';
   progressBarFill.style.width = '0%';
 
@@ -592,7 +620,7 @@ async function sendSingleFile(file, fileIndex, fileCount) {
   // Encrypt and send metadata header packet
   // Structure: [1-byte message type = 0x01] + [12-byte IV] + [ciphertext]
   log(`${tag} Sending metadata (${metadata.size} bytes) in ${totalChunks} chunks.`, 'p2p');
-  progressStatus.innerText = `${batchLabel}Encrypting & sending metadata...`;
+  progressStatus.innerText = `${batchLabel}${t('progress.sendingMeta')}`;
 
   const metadataStr = JSON.stringify(metadata);
   const iv = window.crypto.getRandomValues(new Uint8Array(12));
@@ -715,7 +743,7 @@ async function handleIncomingData(arrayBuffer) {
     // Only act once (on the metadata packet) so chunks don't spam the log/peer.
     if (type === 0x01) {
       log('Incoming file blocked: verify the security code first to receive files.', 'error');
-      alert('A peer is trying to send you a file. Verify the security code to receive it.');
+      alert(t('alert.incomingVerify'));
       // Tell the sender to stop — we won't accept data over an unverified channel.
       sendDataChannelControl(0x05, 'unverified');
     }
@@ -771,7 +799,7 @@ async function handleIncomingData(arrayBuffer) {
       // File Transfer Complete
       const tag = recvTag();
       log(`${tag} Finalization received. Reassembling "${fileMetadata.name}"...`, 'p2p');
-      progressStatus.innerText = 'Reassembling and verifying file...';
+      progressStatus.innerText = t('progress.reassembling');
 
       // Ensure we have all chunks
       const missingChunks = [];
@@ -794,7 +822,7 @@ async function handleIncomingData(arrayBuffer) {
 
       if (receivedHash !== fileMetadata.sha256) {
         log(`${tag} Security Integrity Error: Checksum mismatch! File altered or corrupted.`, 'error');
-        alert(`Security Integrity Error: Checksum mismatch on "${fileMetadata.name}"! Transfer aborted.`);
+        alert(t('alert.checksumMismatch', { name: fileMetadata.name }));
       } else {
         log(`${tag} Integrity verified! File hash matches peer hash perfectly.`, 'success');
 
@@ -809,7 +837,7 @@ async function handleIncomingData(arrayBuffer) {
         URL.revokeObjectURL(url);
 
         log(`${tag} Successfully downloaded and saved: ${fileMetadata.name}`, 'recv');
-        progressStatus.innerText = 'Download Successful!';
+        progressStatus.innerText = t('progress.downloadSuccess');
       }
 
       // Delay cleanup so the user sees the result; if another file in the batch
@@ -823,7 +851,7 @@ async function handleIncomingData(arrayBuffer) {
       // Peer signalled they have not verified the security code. Abort our send.
       // resetTransferState() flips isTransferring off, which halts the send loop.
       log('Peer has not verified the security code. Transfer aborted.', 'error');
-      alert('Your peer has not verified the security code yet. Transfer aborted — ask them to verify, then send again.');
+      alert(t('alert.peerNotVerifiedAbort'));
       resetTransferState();
     }
   } catch (err) {
@@ -836,9 +864,13 @@ async function handleIncomingData(arrayBuffer) {
 // peer is sending more than one file.
 function receiveLabel() {
   if (fileMetadata && fileMetadata.fileCount > 1) {
-    return `File ${fileMetadata.fileIndex + 1}/${fileMetadata.fileCount}: Downloading`;
+    const prefix = t('progress.batchLabel', {
+      index: fileMetadata.fileIndex + 1,
+      count: fileMetadata.fileCount
+    });
+    return `${prefix}${t('progress.downloading')}`;
   }
-  return 'Downloading';
+  return t('progress.downloading');
 }
 
 // Per-file log prefix for the receive side, e.g. "[2/3] report.pdf:".
@@ -849,7 +881,7 @@ function recvTag() {
 }
 
 // Progress metrics updater
-function updateProgress(chunksLoaded, totalChunks, label = 'Transferring') {
+function updateProgress(chunksLoaded, totalChunks, label = t('progress.transferring')) {
   const percent = Math.round((chunksLoaded / totalChunks) * 100);
   progressPercent.innerText = `${percent}%`;
   progressBarFill.style.width = `${percent}%`;
@@ -869,13 +901,13 @@ function updateProgress(chunksLoaded, totalChunks, label = 'Transferring') {
     const bytesRemaining = fileTotalSize - totalBytesTransferred;
     if (bytesPerSec > 0 && bytesRemaining > 0) {
       const eta = Math.round(bytesRemaining / bytesPerSec);
-      progressEta.innerText = `Remaining: ${eta}s`;
+      progressEta.innerText = t('progress.remaining', { eta });
     } else {
-      progressEta.innerText = 'Remaining: 0s';
+      progressEta.innerText = t('progress.remaining', { eta: 0 });
     }
   }
-  
-  progressStatus.innerText = `${label} (${chunksLoaded}/${totalChunks} blocks)...`;
+
+  progressStatus.innerText = t('progress.blocks', { label, loaded: chunksLoaded, total: totalChunks });
 }
 
 function resetTransferState() {
@@ -919,7 +951,7 @@ btnCreateRoom.addEventListener('click', () => {
 btnJoinRoom.addEventListener('click', () => {
   const val = normalizeRoomId(inputRoomId.value);
   if (!val) {
-    alert('Please enter a valid Room ID.');
+    alert(t('alert.invalidRoom'));
     return;
   }
   // Reflect the canonical form back to the user so it's clear what they joined.
@@ -945,7 +977,7 @@ inputRoomId.addEventListener('keydown', (e) => {
 });
 
 btnLeaveRoom.addEventListener('click', () => {
-  if (confirm('Disconnect from current secure room?')) {
+  if (confirm(t('confirm.disconnect'))) {
     resetConnection();
   }
 });
@@ -967,13 +999,13 @@ chkVerified.addEventListener('change', () => {
 function refreshVerificationStatus() {
   if (!aesKey) return;
   if (chkVerified.checked && peerVerified) {
-    textChannelStatus.innerText = 'Both peers verified — secure transfer ready.';
+    textChannelStatus.innerText = t('status.bothVerified');
   } else if (chkVerified.checked && !peerVerified) {
-    textChannelStatus.innerText = 'Waiting for peer to verify the security code...';
+    textChannelStatus.innerText = t('status.waitingPeerVerify');
   } else if (!chkVerified.checked && peerVerified) {
-    textChannelStatus.innerText = 'Peer verified. Confirm the code to enable transfers.';
+    textChannelStatus.innerText = t('status.peerVerifiedConfirm');
   } else {
-    textChannelStatus.innerText = 'Verify the security code on both clients to continue.';
+    textChannelStatus.innerText = t('status.verifyBoth');
   }
 }
 
@@ -984,7 +1016,7 @@ function showConnectionUI(room) {
   chkVerified.checked = false;
   peerVerified = false;
   // Key exchange (and the fingerprint) only starts once a second peer joins.
-  textChannelStatus.innerText = 'Waiting for the other peer to join this room...';
+  textChannelStatus.innerText = t('status.waitingOtherPeer');
 }
 
 function toggleInputStates(disable) {
@@ -1033,7 +1065,7 @@ function resetSecureSession() {
   // Stay on the connection screen; just hide the transfer panel until the
   // channel is re-secured, and show that we're waiting for the peer.
   sectionTransfer.classList.add('hidden');
-  textChannelStatus.innerText = 'Peer disconnected. Waiting for peer to reconnect...';
+  textChannelStatus.innerText = t('status.peerDisconnected');
 }
 
 function resetConnection() {
@@ -1074,7 +1106,7 @@ function resetConnection() {
   // Reset the UI back to a clean, unverified state.
   displayRoomId.innerText = '---';
   displayFingerprint.innerText = '---';
-  textChannelStatus.innerText = 'Securing connection...';
+  textChannelStatus.innerText = t('status.securing');
   chkVerified.checked = false;
 
   sectionConnection.classList.add('hidden');
@@ -1140,8 +1172,11 @@ function renderFileList() {
   }
 
   const totalBytes = selectedFiles.reduce((sum, f) => sum + f.size, 0);
-  fileListSummary.innerText =
-    `${selectedFiles.length} file${selectedFiles.length === 1 ? '' : 's'} selected · ${formatFileSize(totalBytes)}`;
+  const summaryKey = selectedFiles.length === 1 ? 'files.summaryOne' : 'files.summaryMany';
+  fileListSummary.innerText = t(summaryKey, {
+    count: selectedFiles.length,
+    size: formatFileSize(totalBytes)
+  });
 
   selectedFiles.forEach((file, index) => {
     const row = document.createElement('div');
@@ -1157,7 +1192,7 @@ function renderFileList() {
         <div class="file-name"></div>
         <div class="file-size"></div>
       </div>
-      <button class="btn-close" type="button" aria-label="Remove file">
+      <button class="btn-close" type="button" aria-label="${t('files.removeAria')}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="18" y1="6" x2="6" y2="18"/>
           <line x1="6" y1="6" x2="18" y2="18"/>
@@ -1193,9 +1228,7 @@ btnSendFile.addEventListener('click', sendFile);
 // Initialize Client
 window.addEventListener('DOMContentLoaded', () => {
   if (!isCryptoAvailable()) {
-    const msg = 'Encryption unavailable: this app must be opened over HTTPS or via http://localhost. '
-      + 'If you are testing across devices on a LAN IP, the browser disables the Web Crypto API on insecure origins, '
-      + 'so the security code cannot be generated.';
+    const msg = t('alert.cryptoUnavailable');
     log(msg, 'error');
     alert(msg);
     btnCreateRoom.disabled = true;
