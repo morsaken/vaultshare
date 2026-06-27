@@ -206,6 +206,8 @@ async function computeFingerprint(rawPeerPublicKeyBase64) {
   const groups = hashHex.match(/.{1,4}/g).slice(0, 8).join('-');
   displayFingerprint.innerText = groups;
   log(`Calculated line verification code: ${groups}`, 'crypto');
+  // A peer is now connected (keys exchanged) — the join QR is no longer needed.
+  setRoomQrVisible(false);
 }
 
 // Encrypt string with AES-GCM
@@ -1238,6 +1240,9 @@ function refreshVerificationStatus() {
 function showConnectionUI(room) {
   displayRoomId.innerText = room;
   renderRoomQr(room);
+  // Show the join QR while we wait for the other peer; it is hidden once the
+  // secure session is established (see computeFingerprint / resetSecureSession).
+  setRoomQrVisible(true);
   sectionSetup.classList.add('hidden');
   sectionConnection.classList.remove('hidden');
   chkVerified.checked = false;
@@ -1260,6 +1265,13 @@ function renderRoomQr(room) {
     log(`Failed to render room QR: ${err.message}`, 'error');
     roomQr.innerHTML = '';
   }
+}
+
+// Show/hide the room QR. It is only useful while waiting for the other peer to
+// join, so we hide it once connected and bring it back if the peer drops.
+function setRoomQrVisible(visible) {
+  const wrap = document.querySelector('.room-qr-wrapper');
+  if (wrap) wrap.classList.toggle('hidden', !visible);
 }
 
 function toggleInputStates(disable) {
@@ -1311,6 +1323,8 @@ function resetSecureSession() {
   // history is kept so the conversation continues after a reconnect.
   sectionTransfer.classList.add('hidden');
   sectionChat.classList.add('hidden');
+  // Bring the join QR back so the peer can re-scan to reconnect.
+  setRoomQrVisible(true);
   textChannelStatus.innerText = t('status.peerDisconnected');
 }
 
