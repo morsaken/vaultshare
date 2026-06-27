@@ -73,15 +73,40 @@ let incomingQueue = Promise.resolve();
 // CGNAT, corporate Wi-Fi, or an Android emulator's double NAT — where ICE
 // otherwise stalls in "checking" and fails. TURN only relays the already
 // end-to-end-encrypted packets, so it never sees keys or file contents.
-// For production, run your own TURN (coturn) or use a provider, then uncomment
-// and fill in below — keep this in sync with the mobile client's ICE_SERVERS.
-const rtcConfig = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' }
-    // ,{ urls: 'turn:turn.example.com:3478', username: 'YOUR_TURN_USERNAME', credential: 'YOUR_TURN_CREDENTIAL' }
-  ]
-};
+// TURN credentials are requested over the signaling WebSocket — the server only
+// issues them to a paired room, so they can't be harvested from an open
+// endpoint, and the browser never holds a secret. Falls back to STUN-only if
+// the server doesn't answer so direct / same-network transfers still work.
+const STUN_FALLBACK = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' }
+];
+
+// Resolver for the in-flight get-turn-credentials request (set while waiting for
+// the server's 'turn-credentials' reply).
+let pendingTurnCreds = null;
+
+// Build the RTCPeerConnection config. ICE credentials are time-limited and only
+// issued to a live session, so this runs per connection.
+function getRtcConfig() {
+  return new Promise((resolve) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      resolve({ iceServers: STUN_FALLBACK });
+      return;
+    }
+    let settled = false;
+    const finish = (iceServers) => {
+      if (settled) return;
+      settled = true;
+      pendingTurnCreds = null;
+      resolve({ iceServers: (Array.isArray(iceServers) && iceServers.length) ? iceServers : STUN_FALLBACK });
+    };
+    pendingTurnCreds = finish;
+    sendWS({ type: 'get-turn-credentials' });
+    setTimeout(() => finish(null), 8000);
+  });
+}
 
 // --- Logging Helper ---
 function log(msg, type = 'system') {
@@ -305,7 +330,11 @@ function initSignaling() {
         case 'signal':
           await handleSignal(msg.payload);
           break;
-          
+
+        case 'turn-credentials':
+          if (pendingTurnCreds) pendingTurnCreds(msg.iceServers);
+          break;
+
         case 'error':
           log(`Server error: ${msg.message}`, 'error');
           alert(t('alert.serverError', { msg: msg.message }));
@@ -383,7 +412,7 @@ async function handleSignal(payload) {
     // Now that the line is secure, the initiator creates the WebRTC offer
     if (isInitiator) {
       log('Line secured. Initiating WebRTC peer connection...', 'p2p');
-      setupWebRTC();
+      await setupWebRTC();
     }
   } else if (payload.type === 'verified' || payload.type === 'unverified') {
     // Peer announced their security-code verification state.
@@ -409,8 +438,8 @@ async function handleSignal(payload) {
       
       if (decrypted.type === 'offer') {
         log('Received encrypted WebRTC offer. Configuring peer connection...', 'p2p');
-        if (!peerConnection) setupWebRTC();
-        
+        if (!peerConnection) await setupWebRTC();
+
         await peerConnection.setRemoteDescription(new RTCSessionDescription(decrypted.sdp));
         log('Remote description set (offer). Creating WebRTC answer...', 'p2p');
         
@@ -452,9 +481,12 @@ async function decryptPayload(ciphertextBase64) {
 }
 
 // --- WebRTC P2P Manager ---
-function setupWebRTC() {
+async function setupWebRTC() {
   log('Initializing RTCPeerConnection...', 'p2p');
-  peerConnection = new RTCPeerConnection(rtcConfig);
+  // Fetch fresh, time-limited TURN credentials from this origin's server
+  // (STUN-only fallback if unreachable). Awaited before the peer connection so
+  // the relay is available for the first ICE gathering.
+  peerConnection = new RTCPeerConnection(await getRtcConfig());
   
   peerConnection.onicecandidate = async (e) => {
     if (e.candidate) {

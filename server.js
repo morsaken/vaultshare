@@ -2,6 +2,15 @@ const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const path = require('path');
+const crypto = require('crypto');
+
+// Load a local `.env` into process.env if present (Node >= 20.12). PM2 and a
+// bare `node server.js` do NOT auto-load .env; ambient env vars still win.
+try {
+  process.loadEnvFile();
+} catch (_) {
+  /* no .env file — rely on the ambient environment */
+}
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -16,6 +25,90 @@ app.use(express.static(path.join(__dirname, 'public'), {
     res.setHeader('Cache-Control', 'no-cache');
   }
 }));
+
+// --- TURN credentials --------------------------------------------------------
+// A browser can't safely hold a secret (client JS is fully readable), so it
+// never talks to the ../turn credential service directly. Instead this server —
+// which the browser already trusts as its origin — mints the time-based
+// one-time code (TOTP, shared secret with ../turn) server-side, redeems it for
+// short-lived coturn credentials, and serves the ICE list to the browser at
+// GET /turn-credentials.
+//
+// The one-time code may only be redeemed once per ~30s window, and the coturn
+// credentials are valid for hours, so we cache the payload and refresh well
+// before expiry rather than minting a code per browser request (which would
+// collide on the single-use check).
+
+const TURN_AUTH_URL = process.env.TURN_AUTH_URL || 'http://localhost:8080';
+const TURN_AUTH_TOTP_SECRET = process.env.TURN_AUTH_TOTP_SECRET || 'change-me-shared-totp-secret';
+const TOTP_PERIOD = parseInt(process.env.TOTP_PERIOD || '30', 10);
+const TOTP_DIGITS = parseInt(process.env.TOTP_DIGITS || '6', 10);
+
+// STUN-only fallback so direct / same-network transfers still work if the TURN
+// service is unreachable.
+const STUN_FALLBACK = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' }
+];
+
+// Current TOTP code (RFC 6238) — same algorithm as ../turn's verifier and the
+// mobile app: HMAC-SHA1 over the 8-byte big-endian time counter, truncated.
+function turnAuthCode() {
+  const counter = Math.floor(Date.now() / 1000 / TOTP_PERIOD);
+  const buf = Buffer.alloc(8);
+  buf.writeBigUInt64BE(BigInt(counter));
+  const mac = crypto.createHmac('sha1', Buffer.from(TURN_AUTH_TOTP_SECRET, 'utf8')).update(buf).digest();
+  const offset = mac[mac.length - 1] & 0x0f;
+  const bin =
+    ((mac[offset] & 0x7f) << 24) |
+    ((mac[offset + 1] & 0xff) << 16) |
+    ((mac[offset + 2] & 0xff) << 8) |
+    (mac[offset + 3] & 0xff);
+  return String(bin % 10 ** TOTP_DIGITS).padStart(TOTP_DIGITS, '0');
+}
+
+// Cached ICE list + in-flight de-dupe so concurrent browser requests trigger at
+// most one code redemption. iceCache.iceServers is kept as the last-known-good
+// even past the refresh time (the credential itself lives longer), so a failed
+// refresh can still serve valid relay creds instead of dropping to STUN.
+let iceCache = { iceServers: null, expiresAt: 0 };
+let iceInFlight = null;
+
+async function fetchIceServers() {
+  const res = await fetch(`${TURN_AUTH_URL}/credentials`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: turnAuthCode() })
+  });
+  if (!res.ok) throw new Error(`TURN auth HTTP ${res.status}`);
+  const data = await res.json();
+  if (!Array.isArray(data.iceServers) || data.iceServers.length === 0) {
+    throw new Error('TURN auth returned no iceServers');
+  }
+  // Refresh at half the credential lifetime so we never hand out a
+  // nearly-expired credential; clamp for a missing/odd ttl.
+  const ttlSec = Number(data.ttl) > 0 ? Number(data.ttl) : 3600;
+  const refreshMs = Math.max(60, Math.floor(ttlSec / 2)) * 1000;
+  iceCache = { iceServers: data.iceServers, expiresAt: Date.now() + refreshMs };
+  return data.iceServers;
+}
+
+async function getIceServers() {
+  if (iceCache.iceServers && Date.now() < iceCache.expiresAt) {
+    return iceCache.iceServers;
+  }
+  if (!iceInFlight) {
+    iceInFlight = fetchIceServers().finally(() => { iceInFlight = null; });
+  }
+  return iceInFlight;
+}
+
+// NOTE: credentials are intentionally NOT exposed over a plain HTTP endpoint.
+// An open GET would let anyone harvest working relay credentials directly. They
+// are instead handed out only over the signaling WebSocket, and only to a
+// socket that has paired into a room (see the 'get-turn-credentials' handler
+// below). So a credential is only ever issued to an actual in-progress session.
 
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
@@ -246,6 +339,35 @@ wss.on('connection', (ws, req) => {
             }));
           }
           
+          break;
+        }
+
+        case 'get-turn-credentials': {
+          // Hand out TURN credentials ONLY to a socket that is actually paired
+          // in a room (both peer slots filled). A lone scanner sitting in a room
+          // — or anyone not in a room at all — can't farm relay credentials.
+          if (!currentRoomId || !rooms.has(currentRoomId)) {
+            ws.send(JSON.stringify({ type: 'turn-credentials', iceServers: STUN_FALLBACK }));
+            return;
+          }
+          const clients = rooms.get(currentRoomId);
+          pruneDeadClients(clients);
+          if (!clients.includes(ws) || clients.length < MAX_PEERS) {
+            ws.send(JSON.stringify({ type: 'turn-credentials', iceServers: STUN_FALLBACK }));
+            return;
+          }
+          // Mint (cached) credentials from the ../turn service and relay them.
+          getIceServers()
+            .then(iceServers => {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'turn-credentials', iceServers }));
+              }
+            })
+            .catch(() => {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'turn-credentials', iceServers: iceCache.iceServers || STUN_FALLBACK }));
+              }
+            });
           break;
         }
 
