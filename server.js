@@ -39,12 +39,13 @@ const MAX_PEERS = 2;
 // limits, so only trust it when explicitly running behind a known proxy.
 const TRUST_PROXY = process.env.TRUST_PROXY === '1';
 
-const MAX_CONNECTIONS_PER_IP = 10;   // concurrent sockets from one IP
+const MAX_CONNECTIONS_PER_IP = 100;   // concurrent sockets from one IP
 const JOIN_WINDOW_MS = 60 * 1000;    // sliding window for join attempts
 const MAX_JOINS_PER_WINDOW = 30;     // join attempts per IP per window
 const MSG_WINDOW_MS = 10 * 1000;     // sliding window for all messages
 const MAX_MSGS_PER_WINDOW = 120;     // messages per connection per window
 const MAX_ROOM_ID_LENGTH = 64;       // reject absurdly long room IDs
+const HEARTBEAT_INTERVAL_MS = 30 * 1000; // ping clients to detect dead sockets
 
 const connectionsPerIp = new Map();  // ip -> live connection count
 const joinAttempts = new Map();      // ip -> timestamps[] of recent joins
@@ -84,6 +85,26 @@ setInterval(() => {
   }
 }, JOIN_WINDOW_MS).unref();
 
+// Heartbeat: ping every client each interval. A client that didn't answer the
+// previous ping (isAlive still false) is treated as dead and terminated, which
+// fires its 'close' handler — decrementing connectionsPerIp and freeing its room
+// slot. Without this, silently-dropped sockets keep occupying the per-IP
+// connection budget (false "Too many connections") and room slots (false "Room
+// is full"), since an ungraceful drop never fires 'close' on its own.
+const heartbeat = setInterval(() => {
+  for (const ws of wss.clients) {
+    if (ws.isAlive === false) {
+      ws.terminate();
+      continue;
+    }
+
+    ws.isAlive = false;
+    ws.ping();
+  }
+}, HEARTBEAT_INTERVAL_MS).unref();
+
+wss.on('close', () => clearInterval(heartbeat));
+
 // Remove any sockets that are no longer open, so a crashed/dropped peer doesn't
 // keep occupying a slot and cause a false "Room is full" for a real peer.
 function pruneDeadClients(clients) {
@@ -99,6 +120,15 @@ wss.on('connection', (ws, req) => {
 
   let currentRoomId = null;
   let msgTimes = []; // per-connection message timestamps (flood guard)
+
+  // Liveness flag for the heartbeat below. A graceful close fires 'close', but an
+  // ungraceful drop (browser killed, network loss, laptop sleep) sends no close
+  // frame, so the socket lingers — still counted in connectionsPerIp and still
+  // occupying a room slot — until the OS TCP timeout, which can be many minutes.
+  // The ping/pong heartbeat detects these and terminate()s them, which fires the
+  // 'close' handler and releases the per-IP count and room slot.
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
 
   // Track concurrent connections per IP. Registered before the cap check so the
   // close handler always decrements, even for a rejected connection.
