@@ -32,7 +32,7 @@
 <main>
   <p class="lang-nav"><a href="privacy-policy.html">English</a> · <strong>Türkçe</strong></p>
   <h1>VaultShare Gizlilik Politikası</h1>
-  <p class="meta"><strong>Yürürlük tarihi:</strong> 26 Haziran 2026 &nbsp;·&nbsp; <strong>Son güncelleme:</strong> 26 Haziran 2026</p>
+  <p class="meta"><strong>Yürürlük tarihi:</strong> 26 Haziran 2026 &nbsp;·&nbsp; <strong>Son güncelleme:</strong> 27 Haziran 2026</p>
 
   <p>VaultShare (&ldquo;uygulama&rdquo;, &ldquo;biz&rdquo;), uçtan uca şifreli, eşler arası bir
   dosya paylaşım uygulamasıdır. Bu politika, uygulamanın hangi bilgileri işleyip işlemediğini açıklar.
@@ -55,6 +55,9 @@
     <li><strong>Dosya içerikleri, işlettiğimiz hiçbir sunucuya yüklenmez, orada işlenmez veya saklanmaz.</strong> Yalnızca gönderen cihazda, alıcı cihazda ve aralarında (şifreli olarak) aktarım sırasında bulunur.</li>
     <li>Dosyalarınıza erişme, onları kurtarma veya şifresini çözme <strong>yeteneğimiz yoktur</strong>.</li>
   </ul>
+  <p>İsteğe bağlı <strong>güvenli sohbet</strong> de aynı şekilde çalışır: mesajlar cihazınızda şifrelenir, aynı
+  şifreli kanal üzerinden <strong>doğrudan karşı tarafa</strong> gönderilir ve <strong>işlettiğimiz hiçbir sunucuda
+  saklanmaz veya görülmez.</strong> Mesajlarınızı okuyamayız.</p>
 
   <h2>3. Sinyalleşme sunucusu</h2>
   <p>İki cihazın birbirini bulabilmesi için uygulama, sizin veya dağıtıcınız tarafından seçilen bir
@@ -68,21 +71,29 @@
   sizin (ya da onu işleten kişi) tarafından işletilir ve bağlantı meta verisini nasıl ele aldığı o işletmecinin
   sorumluluğundadır.</p>
 
-  <h2>4. STUN / NAT geçişi</h2>
+  <h2>4. STUN / TURN (NAT geçişi)</h2>
   <p>Farklı ağlar arasında doğrudan bir bağlantı kurmak için uygulama, herkese açık <strong>STUN
   sunucularını</strong> (ör. Google'ın herkese açık STUN hizmeti) kullanır. Bir STUN sunucusu, tarafların bir ağ
   yolu bulmasına yardımcı olmak için cihazın <strong>açık IP adresini</strong> öğrenir. Dosya içeriklerini veya
-  şifreleme anahtarlarını almaz. STUN sunucuları, kendi gizlilik politikaları kapsamında üçüncü taraflarca
-  işletilir.</p>
+  şifreleme anahtarlarını almaz.</p>
+  <p>Doğrudan eşler arası bir yol kurulamadığında (örneğin kısıtlayıcı ya da operatör düzeyinde NAT ağlarında),
+  uygulama bağlantıyı iki taraf arasında aktaran bir <strong>üçüncü taraf TURN aktarma sunucusuna</strong> geri
+  dönebilir. Trafik <strong>zaten uçtan uca şifreli</strong> olduğundan, aktarıcı yalnızca şifreli veriyi görür;
+  <strong>açık IP adresinizi</strong> ve şifreli paketleri aktarır, ancak <strong>şifreleme anahtarlarınıza, dosya
+  içeriklerinize veya sohbet mesajlarınıza asla erişemez.</strong> STUN ve TURN sunucuları, kendi gizlilik
+  politikaları kapsamında üçüncü taraflarca işletilir.</p>
 
-  <h2>5. Cihaz izinleri</h2>
+  <h2>5. Kamera ve izinler</h2>
   <ul>
-    <li><strong>İnternet / Ağ durumu</strong> — sinyalleşme sunucusuna ve karşı tarafa bağlanmak için gereklidir.</li>
-    <li><strong>Kamera / Mikrofon</strong> — bu izinler, temeldeki WebRTC kitaplığı (<code>react-native-webrtc</code>)
-    tarafından bildirilir. <strong>VaultShare ses veya video kaydetmez, yakalamaz, iletmez veya kullanmaz.</strong>
-    Uygulama tarafından hiçbir zaman kamera veya mikrofon verisine erişilmez.</li>
+    <li><strong>Kamera</strong> — tarayıcınız kamera erişimini <strong>yalnızca bir oda QR kodunu taramayı
+    seçtiğinizde</strong> ister. Kamera görüntüsü <strong>yalnızca kodu okumak için, gerçek zamanlı olarak
+    tarayıcınızda</strong> işlenir; <strong>hiçbir fotoğraf veya video kaydedilmez, saklanmaz ya da iletilmez.</strong>
+    Bunu istediğiniz zaman tarayıcınızın site ayarlarından reddedebilir veya geri alabilirsiniz.</li>
+    <li><strong>Mikrofon</strong> — VaultShare <strong>mikrofonunuzu asla istemez veya kullanmaz.</strong></li>
   </ul>
-  <p>İzinleri cihazınızın sistem ayarlarından dilediğiniz zaman gözden geçirebilir ve iptal edebilirsiniz.</p>
+  <p>Uygulama, arayüzü tercih ettiğiniz dilde göstermek için <strong>tarayıcı/cihaz dilinizi</strong> yerel olarak
+  okur; bu bilgi hiçbir yere iletilmez. Alınan dosyalar, tarayıcınızın olağan indirme işlemiyle seçtiğiniz konuma
+  kaydedilir.</p>
 
   <h2>6. Veri paylaşımı ve satışı</h2>
   <p>Hiçbir kişisel veriyi üçüncü taraflarla <strong>satmaz, kiralamaz veya paylaşmayız</strong>; çünkü hiçbirini

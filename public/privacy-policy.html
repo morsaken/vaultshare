@@ -32,7 +32,7 @@
 <main>
   <p class="lang-nav"><strong>English</strong> · <a href="privacy-policy.tr.html">Türkçe</a></p>
   <h1>Privacy Policy for VaultShare</h1>
-  <p class="meta"><strong>Effective date:</strong> 26 June 2026 &nbsp;·&nbsp; <strong>Last updated:</strong> 26 June 2026</p>
+  <p class="meta"><strong>Effective date:</strong> 26 June 2026 &nbsp;·&nbsp; <strong>Last updated:</strong> 27 June 2026</p>
 
   <p>VaultShare (&ldquo;the app&rdquo;, &ldquo;we&rdquo;, &ldquo;us&rdquo;) is an end-to-end encrypted,
   peer-to-peer file-sharing application. This policy explains what information the app does and does not
@@ -55,6 +55,9 @@
     <li><strong>File contents are never uploaded to, processed by, or stored on any server we operate.</strong> They exist only on the sending device, the receiving device, and in transit (encrypted) between them.</li>
     <li>We have <strong>no ability to access, recover, or decrypt</strong> your files.</li>
   </ul>
+  <p>The optional <strong>secure chat</strong> works the same way: messages are encrypted on your device, sent
+  <strong>directly to the other peer</strong> over the same encrypted channel, and are <strong>never stored on or
+  seen by any server we operate.</strong> We cannot read them.</p>
 
   <h2>3. The signaling server</h2>
   <p>To let two devices discover each other, the app connects to a <strong>signaling server</strong> (a
@@ -67,20 +70,28 @@
   <p>If you point the app at a <strong>self-hosted</strong> signaling server, that server is operated by you
   (or whoever runs it), and its handling of connection metadata is governed by that operator.</p>
 
-  <h2>4. STUN / NAT traversal</h2>
+  <h2>4. STUN / TURN (NAT traversal)</h2>
   <p>To establish a direct connection across different networks, the app uses public <strong>STUN servers</strong>
   (e.g. Google&rsquo;s public STUN service). A STUN server learns the device&rsquo;s <strong>public IP address</strong>
-  in order to help peers find a network path. It does not receive file contents or encryption keys. STUN servers
-  are operated by third parties under their own privacy policies.</p>
+  in order to help peers find a network path. It does not receive file contents or encryption keys.</p>
+  <p>When a direct peer-to-peer path cannot be established (for example, on restrictive or carrier-grade NAT
+  networks), the app may fall back to a <strong>third-party TURN relay server</strong> that forwards the connection
+  between the two peers. Because the traffic is <strong>already end-to-end encrypted</strong>, the relay only ever
+  sees ciphertext — it relays your <strong>public IP address</strong> and the encrypted packets, and <strong>never
+  has access to your encryption keys, file contents, or chat messages.</strong> STUN and TURN servers are operated
+  by third parties under their own privacy policies.</p>
 
-  <h2>5. Device permissions</h2>
+  <h2>5. Camera &amp; permissions</h2>
   <ul>
-    <li><strong>Internet / Network state</strong> — required to connect to the signaling server and the other peer.</li>
-    <li><strong>Camera / Microphone</strong> — these permissions are declared by the underlying WebRTC library
-    (<code>react-native-webrtc</code>). <strong>VaultShare does not record, capture, transmit, or use audio or
-    video.</strong> No camera or microphone data is ever accessed by the app.</li>
+    <li><strong>Camera</strong> — your browser requests camera access <strong>only when you choose to scan a room
+    QR code</strong>. The camera image is processed <strong>in your browser, in real time, solely to read the
+    code</strong>; <strong>no photos or video are recorded, stored, or transmitted.</strong> You can deny or revoke
+    this at any time in your browser&rsquo;s site settings.</li>
+    <li><strong>Microphone</strong> — VaultShare <strong>never requests or uses your microphone.</strong></li>
   </ul>
-  <p>You can review and revoke permissions at any time in your device&rsquo;s system settings.</p>
+  <p>The app reads your <strong>browser/device language</strong> locally to display its interface in your preferred
+  language; this is not transmitted anywhere. Received files are saved through your browser&rsquo;s normal download
+  to the location you choose.</p>
 
   <h2>6. Data sharing and sale</h2>
   <p>We do <strong>not</strong> sell, rent, or share any personal data with third parties, because we do not

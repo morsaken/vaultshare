@@ -56,6 +56,7 @@ const translations = {
     'log.clear': 'Clear Log',
 
     'footer.text': 'All encryption keys and data transfers are ephemeral. No files ever touch our servers.',
+    'footer.privacy': 'Privacy Policy',
 
     'status.securing': 'Securing connection...',
     'status.keyExchange': 'Performing key exchange...',
@@ -143,6 +144,7 @@ const translations = {
     'log.clear': 'Günlüğü Temizle',
 
     'footer.text': 'Tüm şifreleme anahtarları ve veri aktarımları geçicidir. Hiçbir dosya sunucularımıza dokunmaz.',
+    'footer.privacy': 'Gizlilik Politikası',
 
     'status.securing': 'Bağlantı güvenli hâle getiriliyor...',
     'status.keyExchange': 'Anahtar değişimi yapılıyor...',
@@ -222,6 +224,12 @@ function applyStaticTranslations() {
   });
   document.querySelectorAll('[data-i18n-aria-label]').forEach((el) => {
     el.setAttribute('aria-label', t(el.getAttribute('data-i18n-aria-label')));
+  });
+  // Point links at the current language's page: "<base>.html" for English,
+  // "<base>.<lang>.html" otherwise (e.g. privacy-policy.tr.html).
+  document.querySelectorAll('[data-i18n-localized-href]').forEach((el) => {
+    const base = el.getAttribute('data-i18n-localized-href');
+    el.setAttribute('href', currentLang === 'en' ? `${base}.html` : `${base}.${currentLang}.html`);
   });
 
   // Reflect the active language on the switcher buttons.
