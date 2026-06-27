@@ -60,7 +60,7 @@
   <p>İki cihazın birbirini bulabilmesi için uygulama, sizin veya dağıtıcınız tarafından seçilen bir
   <strong>sinyalleşme sunucusuna</strong> (hafif bir aktarıcı) bağlanır. Sinyalleşme sunucusu:</p>
   <ul>
-    <li>İki eşin doğrudan bir bağlantı açmak için gereken bilgileri (oda kodu ve her eşin <strong>açık ECDH anahtarı</strong> ile ağ adayları dâhil olmak üzere açık bağlantı ayrıntıları) değiş tokuş etmesine yardımcı olur.</li>
+    <li>İki tarafın doğrudan bir bağlantı açmak için gereken bilgileri (oda kodu ve her tarafın <strong>açık ECDH anahtarı</strong> ile ağ adayları dâhil olmak üzere açık bağlantı ayrıntıları) değiş tokuş etmesine yardımcı olur.</li>
     <li>Dosya içeriklerinizi <strong>asla almaz</strong> ve özel anahtarlarınızı ya da türetilen oturum anahtarını <strong>asla almaz.</strong></li>
     <li>Bağlantıyı yönlendirmek için teknik olarak gerekli olduğundan, bağlanan cihazların <strong>IP adresini</strong> ve kısa ömürlü <strong>oda kodunu</strong> zorunlu olarak görür. Bu bağlantı meta verisi yalnızca oturumu kurmak için kullanılır; sizi tanımlamak veya profillemek için tarafımızca kullanılmaz.</li>
   </ul>
@@ -70,14 +70,14 @@
 
   <h2>4. STUN / NAT geçişi</h2>
   <p>Farklı ağlar arasında doğrudan bir bağlantı kurmak için uygulama, herkese açık <strong>STUN
-  sunucularını</strong> (ör. Google'ın herkese açık STUN hizmeti) kullanır. Bir STUN sunucusu, eşlerin bir ağ
+  sunucularını</strong> (ör. Google'ın herkese açık STUN hizmeti) kullanır. Bir STUN sunucusu, tarafların bir ağ
   yolu bulmasına yardımcı olmak için cihazın <strong>açık IP adresini</strong> öğrenir. Dosya içeriklerini veya
   şifreleme anahtarlarını almaz. STUN sunucuları, kendi gizlilik politikaları kapsamında üçüncü taraflarca
   işletilir.</p>
 
   <h2>5. Cihaz izinleri</h2>
   <ul>
-    <li><strong>İnternet / Ağ durumu</strong> — sinyalleşme sunucusuna ve diğer eşe bağlanmak için gereklidir.</li>
+    <li><strong>İnternet / Ağ durumu</strong> — sinyalleşme sunucusuna ve karşı tarafa bağlanmak için gereklidir.</li>
     <li><strong>Kamera / Mikrofon</strong> — bu izinler, temeldeki WebRTC kitaplığı (<code>react-native-webrtc</code>)
     tarafından bildirilir. <strong>VaultShare ses veya video kaydetmez, yakalamaz, iletmez veya kullanmaz.</strong>
     Uygulama tarafından hiçbir zaman kamera veya mikrofon verisine erişilmez.</li>
