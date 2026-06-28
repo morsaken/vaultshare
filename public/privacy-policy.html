@@ -63,9 +63,9 @@
   <p>To let two devices discover each other, the app connects to a <strong>signaling server</strong> (a
   lightweight relay) chosen by you or your distributor. The signaling server:</p>
   <ul>
-    <li>Helps the two peers exchange the information needed to open a direct connection (room code and public connection details, including each peer&rsquo;s <strong>public ECDH key</strong> and network candidates).</li>
+    <li>Helps the two peers exchange the information needed to open a direct connection (channel code and public connection details, including each peer&rsquo;s <strong>public ECDH key</strong> and network candidates).</li>
     <li><strong>Never receives your file contents</strong> and <strong>never receives your private keys or the derived session key.</strong></li>
-    <li>Necessarily observes the <strong>IP address</strong> of connecting devices and the short-lived <strong>room code</strong>, as is technically required to route the connection. This connection metadata is used only to establish the session and is not used by us to identify or profile you.</li>
+    <li>Necessarily observes the <strong>IP address</strong> of connecting devices and the short-lived <strong>channel code</strong>, as is technically required to route the connection. This connection metadata is used only to establish the session and is not used by us to identify or profile you.</li>
   </ul>
   <p>If you point the app at a <strong>self-hosted</strong> signaling server, that server is operated by you
   (or whoever runs it), and its handling of connection metadata is governed by that operator.</p>
@@ -75,15 +75,16 @@
   (e.g. Google&rsquo;s public STUN service). A STUN server learns the device&rsquo;s <strong>public IP address</strong>
   in order to help peers find a network path. It does not receive file contents or encryption keys.</p>
   <p>When a direct peer-to-peer path cannot be established (for example, on restrictive or carrier-grade NAT
-  networks), the app may fall back to a <strong>third-party TURN relay server</strong> that forwards the connection
-  between the two peers. Because the traffic is <strong>already end-to-end encrypted</strong>, the relay only ever
-  sees ciphertext — it relays your <strong>public IP address</strong> and the encrypted packets, and <strong>never
-  has access to your encryption keys, file contents, or chat messages.</strong> STUN and TURN servers are operated
-  by third parties under their own privacy policies.</p>
+  networks), the app may fall back to a <strong>TURN relay server that we operate</strong>, which forwards the
+  connection between the two peers. Because the traffic is <strong>already end-to-end encrypted</strong>, the relay
+  only ever sees ciphertext — it relays your <strong>public IP address</strong> and the encrypted packets, and
+  <strong>never has access to your encryption keys, file contents, or chat messages.</strong> The public STUN
+  servers are operated by third parties under their own privacy policies; the TURN relay is operated by us and
+  processes only the encrypted connection metadata described above.</p>
 
   <h2>5. Camera &amp; permissions</h2>
   <ul>
-    <li><strong>Camera</strong> — your browser requests camera access <strong>only when you choose to scan a room
+    <li><strong>Camera</strong> — your browser requests camera access <strong>only when you choose to scan a channel
     QR code</strong>. The camera image is processed <strong>in your browser, in real time, solely to read the
     code</strong>; <strong>no photos or video are recorded, stored, or transmitted.</strong> You can deny or revoke
     this at any time in your browser&rsquo;s site settings.</li>

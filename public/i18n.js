@@ -16,16 +16,16 @@ const translations = {
     'badge.connecting': 'Connecting...',
 
     'setup.title': 'Establish Secure Channel',
-    'setup.intro': 'To transfer files securely, create a new ephemeral room or join an existing one. All signaling traffic is encrypted and the final data connection is established directly peer-to-peer.',
-    'setup.optionA': 'Option A: Create a Room',
-    'setup.create': 'Generate Secret Room',
+    'setup.intro': 'To transfer files securely, create a new ephemeral channel or join an existing one. All signaling traffic is encrypted and the final data connection is established directly peer-to-peer.',
+    'setup.optionA': 'Option A: Create a Channel',
+    'setup.create': 'Generate Secret Channel',
     'setup.or': 'OR',
-    'setup.optionB': 'Option B: Join a Room',
-    'setup.placeholder': 'Room ID (e.g. 529-194)',
+    'setup.optionB': 'Option B: Join a Channel',
+    'setup.placeholder': 'Channel ID (e.g. 529-194)',
     'setup.join': 'Join',
     'scan.button': 'Scan QR code',
-    'scan.title': 'Scan room QR',
-    'scan.hint': "Point the camera at the other device's room QR code.",
+    'scan.title': 'Scan channel QR',
+    'scan.hint': "Point the camera at the other device's channel QR code.",
     'scan.cancel': 'Cancel',
     'scan.noCamera': 'Could not access the camera. Check browser permissions.',
 
@@ -52,7 +52,7 @@ const translations = {
     'chat.peer': 'Peer',
     'notify.newMessage': 'New message from peer',
 
-    'log.title': 'Cryptographic Security Audit Log',
+    'log.title': 'Activity Log',
     'log.clear': 'Clear Log',
 
     'footer.text': 'All encryption keys and data transfers are ephemeral. No files ever touch our servers.',
@@ -66,7 +66,7 @@ const translations = {
     'status.waitingPeerVerify': 'Waiting for peer to verify the security code...',
     'status.peerVerifiedConfirm': 'Peer verified. Confirm the code to enable transfers.',
     'status.verifyBoth': 'Verify the security code on both clients to continue.',
-    'status.waitingOtherPeer': 'Waiting for the other peer to join this room...',
+    'status.waitingOtherPeer': 'Waiting for the other peer to join this channel...',
     'status.peerDisconnected': 'Peer disconnected. Waiting for peer to reconnect...',
 
     'progress.complete': 'Transfer Complete!',
@@ -86,13 +86,15 @@ const translations = {
     'alert.incomingVerify': 'A peer is trying to send you a file. Verify the security code to receive it.',
     'alert.checksumMismatch': 'Security Integrity Error: Checksum mismatch on "{name}"! Transfer aborted.',
     'alert.peerNotVerifiedAbort': 'Your peer has not verified the security code yet. Transfer aborted — ask them to verify, then send again.',
-    'alert.invalidRoom': 'Please enter a valid Room ID.',
-    'confirm.disconnect': 'Disconnect from current secure room?',
+    'alert.peerCancelled': 'The peer cancelled the transfer.',
+    'alert.invalidRoom': 'Please enter a valid Channel ID.',
+    'confirm.disconnect': 'Disconnect from current secure channel?',
     'alert.cryptoUnavailable': 'Encryption unavailable: this app must be opened over HTTPS or via http://localhost. If you are testing across devices on a LAN IP, the browser disables the Web Crypto API on insecure origins, so the security code cannot be generated.',
 
     'files.summaryOne': '{count} file selected · {size}',
     'files.summaryMany': '{count} files selected · {size}',
     'files.removeAria': 'Remove file',
+    'files.sent': 'sent',
   },
 
   tr: {
@@ -104,16 +106,16 @@ const translations = {
     'badge.connecting': 'Bağlanıyor...',
 
     'setup.title': 'Güvenli Kanal Kur',
-    'setup.intro': 'Dosyaları güvenle aktarmak için yeni bir geçici oda oluşturun ya da var olan bir odaya katılın. Tüm sinyalleşme trafiği şifrelenir ve nihai veri bağlantısı doğrudan eşler arasında kurulur.',
-    'setup.optionA': 'Seçenek A: Oda Oluştur',
-    'setup.create': 'Gizli Oda Oluştur',
+    'setup.intro': 'Dosyaları güvenle aktarmak için yeni bir geçici kanal oluşturun ya da var olan bir kanala katılın. Tüm sinyalleşme trafiği şifrelenir ve nihai veri bağlantısı doğrudan eşler arasında kurulur.',
+    'setup.optionA': 'Seçenek A: Kanal Oluştur',
+    'setup.create': 'Gizli Kanal Oluştur',
     'setup.or': 'VEYA',
-    'setup.optionB': 'Seçenek B: Odaya Katıl',
-    'setup.placeholder': 'Oda Kimliği (örn. 529-194)',
+    'setup.optionB': 'Seçenek B: Kanala Katıl',
+    'setup.placeholder': 'Kanal Kimliği (örn. 529-194)',
     'setup.join': 'Katıl',
     'scan.button': 'QR kodu tara',
-    'scan.title': 'Oda QR kodunu tara',
-    'scan.hint': 'Kamerayı diğer cihazın oda QR koduna doğrultun.',
+    'scan.title': 'Kanal QR kodunu tara',
+    'scan.hint': 'Kamerayı diğer cihazın kanal QR koduna doğrultun.',
     'scan.cancel': 'İptal',
     'scan.noCamera': 'Kameraya erişilemedi. Tarayıcı izinlerini kontrol edin.',
 
@@ -140,7 +142,7 @@ const translations = {
     'chat.peer': 'Karşı taraf',
     'notify.newMessage': 'Karşı taraftan yeni mesaj',
 
-    'log.title': 'Kriptografik Güvenlik Denetim Günlüğü',
+    'log.title': 'Etkinlik Günlüğü',
     'log.clear': 'Günlüğü Temizle',
 
     'footer.text': 'Tüm şifreleme anahtarları ve veri aktarımları geçicidir. Hiçbir dosya sunucularımıza dokunmaz.',
@@ -154,7 +156,7 @@ const translations = {
     'status.waitingPeerVerify': 'Karşı tarafın güvenlik kodunu doğrulaması bekleniyor...',
     'status.peerVerifiedConfirm': 'Karşı taraf doğrulandı. Aktarımları etkinleştirmek için kodu onaylayın.',
     'status.verifyBoth': 'Devam etmek için güvenlik kodunu her iki istemcide de doğrulayın.',
-    'status.waitingOtherPeer': 'Karşı tarafın bu odaya katılması bekleniyor...',
+    'status.waitingOtherPeer': 'Karşı tarafın bu kanala katılması bekleniyor...',
     'status.peerDisconnected': 'Karşı tarafın bağlantısı kesildi. Yeniden bağlanması bekleniyor...',
 
     'progress.complete': 'Aktarım Tamamlandı!',
@@ -174,13 +176,15 @@ const translations = {
     'alert.incomingVerify': 'Karşı taraf size dosya göndermeye çalışıyor. Almak için güvenlik kodunu doğrulayın.',
     'alert.checksumMismatch': 'Güvenlik Bütünlüğü Hatası: "{name}" dosyasında sağlama toplamı uyuşmuyor! Aktarım iptal edildi.',
     'alert.peerNotVerifiedAbort': 'Karşı taraf güvenlik kodunu henüz doğrulamadı. Aktarım iptal edildi — doğrulamasını isteyin, sonra yeniden gönderin.',
-    'alert.invalidRoom': 'Lütfen geçerli bir Oda Kimliği girin.',
-    'confirm.disconnect': 'Geçerli güvenli odadan bağlantı kesilsin mi?',
+    'alert.peerCancelled': 'Karşı taraf aktarımı iptal etti.',
+    'alert.invalidRoom': 'Lütfen geçerli bir Kanal Kimliği girin.',
+    'confirm.disconnect': 'Geçerli güvenli kanaldan bağlantı kesilsin mi?',
     'alert.cryptoUnavailable': 'Şifreleme kullanılamıyor: bu uygulama HTTPS üzerinden ya da http://localhost ile açılmalıdır. Cihazlar arası bir LAN IP\'sinde test ediyorsanız, tarayıcı güvenli olmayan kaynaklarda Web Crypto API\'sini devre dışı bırakır, bu yüzden güvenlik kodu oluşturulamaz.',
 
     'files.summaryOne': '{count} dosya seçildi · {size}',
     'files.summaryMany': '{count} dosya seçildi · {size}',
     'files.removeAria': 'Dosyayı kaldır',
+    'files.sent': 'gönderildi',
   },
 };
 

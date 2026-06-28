@@ -47,25 +47,25 @@
       <!-- ROOM SETUP STATE -->
       <section id="section-setup" class="card setup-card">
         <h2 data-i18n="setup.title">Establish Secure Channel</h2>
-        <p data-i18n="setup.intro">To transfer files securely, create a new ephemeral room or join an existing one. All signaling traffic is encrypted and the final data connection is established directly peer-to-peer.</p>
+        <p data-i18n="setup.intro">To transfer files securely, create a new ephemeral channel or join an existing one. All signaling traffic is encrypted and the final data connection is established directly peer-to-peer.</p>
 
         <div class="setup-grid">
           <div class="setup-col">
-            <h3 data-i18n="setup.optionA">Option A: Create a Room</h3>
+            <h3 data-i18n="setup.optionA">Option A: Create a Channel</h3>
             <button id="btn-create-room" class="btn btn-primary">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
                 <path d="M12 5v14M5 12h14"/>
               </svg>
-              <span data-i18n="setup.create">Generate Secret Room</span>
+              <span data-i18n="setup.create">Generate Secret Channel</span>
             </button>
           </div>
 
           <div class="divider-text" data-i18n="setup.or">OR</div>
 
           <div class="setup-col">
-            <h3 data-i18n="setup.optionB">Option B: Join a Room</h3>
+            <h3 data-i18n="setup.optionB">Option B: Join a Channel</h3>
             <div class="join-group">
-              <input type="text" id="input-room-id" data-i18n-placeholder="setup.placeholder" placeholder="Room ID (e.g. 529-194)" autocomplete="off" spellcheck="false">
+              <input type="text" id="input-room-id" data-i18n-placeholder="setup.placeholder" placeholder="Channel ID (e.g. 529-194)" autocomplete="off" spellcheck="false">
               <button id="btn-join-room" class="btn btn-secondary" data-i18n="setup.join">Join</button>
             </div>
             <button id="btn-scan-qr" class="btn btn-ghost btn-scan" type="button">
@@ -203,14 +203,14 @@
   <div id="scanner-overlay" class="scanner-overlay hidden" role="dialog" aria-modal="true">
     <div class="scanner-box">
       <div class="scanner-header">
-        <span data-i18n="scan.title">Scan room QR</span>
+        <span data-i18n="scan.title">Scan channel QR</span>
         <button id="btn-scan-close" class="btn btn-ghost btn-sm" type="button" data-i18n="scan.cancel">Cancel</button>
       </div>
       <div class="scanner-video-wrap">
         <video id="scanner-video" playsinline muted></video>
         <div class="scanner-reticle"></div>
       </div>
-      <p id="scanner-msg" class="scanner-msg" data-i18n="scan.hint">Point the camera at the other device's room QR code.</p>
+      <p id="scanner-msg" class="scanner-msg" data-i18n="scan.hint">Point the camera at the other device's channel QR code.</p>
     </div>
   </div>
 

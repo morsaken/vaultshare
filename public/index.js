@@ -61,6 +61,19 @@ let fileMetadata = null;
 let isTransferring = false;
 // The file currently being streamed out (used for send-side progress/ETA).
 let activeSendFile = null;
+// --- Resumable transfers ---
+// Partially-received files stashed by content hash when a transfer is
+// interrupted (peer drop), so a re-send resumes from the first missing chunk.
+// The data channel is ordered + reliable, so what we hold is a contiguous prefix.
+const partials = new Map();
+// Keys (name|size) of files fully sent this session, so a resume re-send skips
+// the completed ones and only continues the interrupted file.
+let sentFileKeys = new Set();
+// Sender side: resolves with the receiver's resume offset after we send metadata.
+let resumeResolve = null;
+// Whether the current peer speaks the resume protocol (null=unknown, false=an
+// older client that never answers). Reset per handshake.
+let peerSupportsResume = null;
 // Pending receiver reset; cleared when a back-to-back file starts arriving.
 let receiverResetTimer = null;
 // Serializes async processing of incoming P2P packets so handlers for
@@ -604,8 +617,16 @@ async function sendFile() {
   toggleInputStates(true);
   progressContainer.classList.remove('hidden');
 
-  // Snapshot the queue so it can't change mid-transfer.
-  const batch = selectedFiles.slice();
+  // Snapshot the queue so it can't change mid-transfer. Skip files already fully
+  // sent this session (so tapping Send again after a peer drop resumes the
+  // interrupted file without re-sending the completed ones).
+  const batch = selectedFiles.slice().filter((f) => !sentFileKeys.has(`${f.name}|${f.size}`));
+  if (batch.length === 0) {
+    isTransferring = false;
+    toggleInputStates(false);
+    progressContainer.classList.add('hidden');
+    return;
+  }
   log(`Starting transfer of ${batch.length} file(s):`, 'send');
   batch.forEach((file, i) => {
     log(`  ${i + 1}. ${file.name} (${formatFileSize(file.size)})`, 'send');
@@ -616,6 +637,7 @@ async function sendFile() {
 
     const ok = await sendSingleFile(batch[f], f, batch.length);
     if (!ok) return; // Cancelled/aborted mid-file; state already reset.
+    sentFileKeys.add(`${batch[f].name}|${batch[f].size}`);
   }
 
   log(`All ${batch.length} file(s) transferred successfully!`, 'send');
@@ -626,8 +648,32 @@ async function sendFile() {
     activeSendFile = null;
     toggleInputStates(false);
     progressContainer.classList.add('hidden');
-    clearSelectedFiles();
+    // Keep the queue + "sent" markers so sent files stay listed (marked as sent)
+    // until the user leaves the room — matches the mobile app.
+    renderFileList();
   }, 2000);
+}
+
+// Wait (briefly) for the receiver's resume offset after we send metadata.
+// Resolves with the chunk index to start from. Falls back to 0 if the peer
+// doesn't answer (older client) so we stay interoperable.
+function waitForResume(totalChunks) {
+  if (peerSupportsResume === false) return Promise.resolve(0);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (fromIndex) => {
+      if (settled) return;
+      settled = true;
+      resumeResolve = null;
+      clearTimeout(timer);
+      resolve(Math.max(0, Math.min(Math.floor(fromIndex) || 0, totalChunks)));
+    };
+    const timer = setTimeout(() => {
+      if (peerSupportsResume === null) peerSupportsResume = false;
+      finish(0);
+    }, 1500);
+    resumeResolve = finish;
+  });
 }
 
 // Stream a single file: metadata (0x01) -> chunks (0x02) -> complete (0x04).
@@ -687,16 +733,26 @@ async function sendSingleFile(file, fileIndex, fileCount) {
 
   dataChannel.send(metaPacket);
 
+  // Wait for the receiver to tell us where to (re)start: 0 for a fresh transfer,
+  // or the next missing chunk if it already holds a partial copy of this exact
+  // file. A peer that doesn't speak the resume protocol never answers, so we fall
+  // back to 0 after a short timeout.
+  const startChunk = await waitForResume(totalChunks);
+  if (!isTransferring) return false;
+  if (startChunk > 0) {
+    log(`${tag} Resuming from chunk ${startChunk}/${totalChunks}.`, 'send');
+  }
+
   // Send file chunks with backpressure
   log(`${tag} Starting chunk transmission stream...`, 'p2p');
   startTime = Date.now();
-  totalBytesTransferred = 0;
+  totalBytesTransferred = startChunk * chunkSize;
 
   const BUFFER_THRESHOLD = 64 * 1024; // 64 KB threshold
   dataChannel.bufferedAmountLowThreshold = BUFFER_THRESHOLD;
 
-  let offset = 0;
-  for (let i = 0; i < totalChunks; i++) {
+  let offset = startChunk * chunkSize;
+  for (let i = startChunk; i < totalChunks; i++) {
     // Backpressure check
     if (dataChannel.bufferedAmount > BUFFER_THRESHOLD) {
       await new Promise((resolve) => {
@@ -924,6 +980,21 @@ async function handleIncomingData(arrayBuffer) {
     return;
   }
 
+  // Resume offset (0x08) — the receiver's answer to our metadata, telling us
+  // which chunk to start from. Consumed by the SENDER, so handled before the
+  // verify gate (the sender has already verified to be sending).
+  if (type === 0x08) {
+    try {
+      const decrypted = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, ciphertext);
+      const from = parseInt(new TextDecoder().decode(decrypted), 10);
+      peerSupportsResume = true;
+      if (resumeResolve && Number.isFinite(from)) resumeResolve(from);
+    } catch (err) {
+      /* ignore a bad resume packet */
+    }
+    return;
+  }
+
   if (!chkVerified.checked) {
     // Only act once (on the metadata packet) so chunks don't spam the log/peer.
     if (type === 0x01) {
@@ -958,14 +1029,31 @@ async function handleIncomingData(arrayBuffer) {
       log(`${recvTag()} Peer's file SHA-256 checksum: ${fileMetadata.sha256}`, 'crypto');
 
       expectedTotalChunks = fileMetadata.totalChunks;
-      receivedChunks = new Array(expectedTotalChunks);
-      totalBytesTransferred = 0;
+
+      // Resume support: if we already hold a partial copy of this exact file
+      // (matched by content hash) from an interrupted transfer, restore it and
+      // tell the sender to continue from the first missing chunk. Otherwise we
+      // start fresh and ask for chunk 0.
+      const partial = partials.get(fileMetadata.sha256);
+      let resumeFrom = 0;
+      if (partial && partial.meta.totalChunks === expectedTotalChunks && partial.meta.size === fileMetadata.size) {
+        receivedChunks = partial.chunks;
+        resumeFrom = partial.count;
+        log(`${recvTag()} Resuming download from chunk ${resumeFrom}.`, 'recv');
+      } else {
+        receivedChunks = new Array(expectedTotalChunks);
+      }
+      partials.delete(fileMetadata.sha256);
+
+      totalBytesTransferred = resumeFrom * (60 * 1024);
       startTime = Date.now();
       isTransferring = true;
       toggleInputStates(true);
+      // Answer the sender with our resume offset (0 for a fresh transfer).
+      sendDataChannelControl(0x08, String(resumeFrom));
 
       progressContainer.classList.remove('hidden');
-      updateProgress(0, expectedTotalChunks, receiveLabel());
+      updateProgress(resumeFrom, expectedTotalChunks, receiveLabel());
       
     } else if (type === 0x02) {
       // File Chunk
@@ -1033,10 +1121,18 @@ async function handleIncomingData(arrayBuffer) {
       }, 2000);
 
     } else if (type === 0x05) {
-      // Peer signalled they have not verified the security code. Abort our send.
-      // resetTransferState() flips isTransferring off, which halts the send loop.
-      log('Peer has not verified the security code. Transfer aborted.', 'error');
-      alert(t('alert.peerNotVerifiedAbort'));
+      // Out-of-band control. resetTransferState() flips isTransferring off, which
+      // halts the send loop on the other side of the transfer.
+      const ctrl = new TextDecoder().decode(decrypted);
+      if (ctrl === 'cancel') {
+        log('Peer cancelled the transfer.', 'error');
+        alert(t('alert.peerCancelled'));
+      } else {
+        log('Peer has not verified the security code. Transfer aborted.', 'error');
+        alert(t('alert.peerNotVerifiedAbort'));
+      }
+      // An explicit cancel/abort discards any saved partial — don't resume it.
+      if (fileMetadata) partials.delete(fileMetadata.sha256);
       resetTransferState();
     }
   } catch (err) {
@@ -1095,9 +1191,16 @@ function updateProgress(chunksLoaded, totalChunks, label = t('progress.transferr
   progressStatus.innerText = t('progress.blocks', { label, loaded: chunksLoaded, total: totalChunks });
 }
 
-function resetTransferState() {
+// `keepSelected` preserves the send queue + "already sent" markers across a peer
+// drop so an interrupted transfer can be resumed when the peer reconnects.
+function resetTransferState(keepSelected = false) {
   isTransferring = false;
   activeSendFile = null;
+  if (resumeResolve) {
+    // Abort a pending metadata->resume wait so the send loop unwinds cleanly.
+    resumeResolve(0);
+    resumeResolve = null;
+  }
   if (receiverResetTimer !== null) {
     clearTimeout(receiverResetTimer);
     receiverResetTimer = null;
@@ -1107,7 +1210,32 @@ function resetTransferState() {
   receivedChunks = [];
   fileMetadata = null;
   expectedTotalChunks = 0;
-  clearSelectedFiles();
+  if (!keepSelected) {
+    sentFileKeys = new Set();
+    clearSelectedFiles();
+  }
+}
+
+// Length of the contiguous prefix of chunks we hold. The data channel is ordered
+// + reliable, so received chunks are always [0..n-1] with no holes.
+function contiguousPrefix() {
+  let n = 0;
+  while (n < receivedChunks.length && receivedChunks[n] !== undefined) n++;
+  return n;
+}
+
+// If an incoming transfer is in progress, stash the contiguous prefix we hold
+// (keyed by content hash) so a later re-send resumes instead of restarting.
+function stashPartialReceive() {
+  if (!fileMetadata) return; // not mid-receive
+  const have = contiguousPrefix();
+  if (have <= 0 || have >= expectedTotalChunks) return; // nothing useful / done
+  partials.set(fileMetadata.sha256, {
+    meta: fileMetadata,
+    chunks: receivedChunks.slice(0, have),
+    count: have,
+  });
+  log(`Saved ${have}/${expectedTotalChunks} chunks of "${fileMetadata.name}" — will resume on reconnect.`, 'recv');
 }
 
 // --- UI Event Listeners & State Controls ---
@@ -1229,9 +1357,12 @@ btnScanQr.addEventListener('click', openScanner);
 btnScanClose.addEventListener('click', closeScanner);
 
 btnLeaveRoom.addEventListener('click', () => {
-  if (confirm(t('confirm.disconnect'))) {
-    resetConnection();
-  }
+  // Only confirm when a peer is actually connected — tearing down an active
+  // secure session is worth a prompt. When we're alone in the channel (no peer
+  // has joined yet, or the peer already left), leaving is harmless, so skip the
+  // dialog and disconnect immediately.
+  if (peerConnection && !confirm(t('confirm.disconnect'))) return;
+  resetConnection();
 });
 
 chkVerified.addEventListener('change', () => {
@@ -1343,10 +1474,13 @@ function resetSecureSession() {
   chkVerified.checked = false;
   updateVerifyBadges();
   incomingQueue = Promise.resolve();
+  peerSupportsResume = null; // unknown until the new peer answers
 
-  // Wipe transfer/receiver state (received plaintext chunks, metadata, timers,
-  // selected files, progress bar) and re-evaluate input locks.
-  resetTransferState();
+  // Preserve any partially-received file so it resumes when the peer rejoins.
+  stashPartialReceive();
+  // Wipe transfer/receiver state but KEEP the send queue + sent markers so an
+  // interrupted upload can be resumed once the peer reconnects and both re-verify.
+  resetTransferState(true);
 
   displayFingerprint.innerText = '---';
 
@@ -1390,6 +1524,9 @@ function resetConnection() {
 
   // Drop any in-flight packet processing chain.
   incomingQueue = Promise.resolve();
+  peerSupportsResume = null;
+  // Leaving the room entirely — discard any saved partials (no resume across rooms).
+  partials.clear();
 
   // Wipe transfer/receiver state (received plaintext chunks, metadata,
   // pending timers, selected files, progress bar).
@@ -1496,7 +1633,17 @@ function renderFileList() {
         </svg>
       </button>`;
     row.querySelector('.file-name').innerText = file.name;
-    row.querySelector('.file-size').innerText = formatFileSize(file.size);
+    const sizeEl = row.querySelector('.file-size');
+    sizeEl.innerText = formatFileSize(file.size);
+    // Mark files already sent this session so they stay visibly "sent" in the
+    // queue until the user leaves the room.
+    if (sentFileKeys.has(`${file.name}|${file.size}`)) {
+      row.classList.add('file-info-row-sent');
+      const badge = document.createElement('span');
+      badge.className = 'file-sent-badge';
+      badge.innerText = `  ✓ ${t('files.sent')}`;
+      sizeEl.appendChild(badge);
+    }
     row.querySelector('.btn-close').addEventListener('click', () => removeFile(index));
     fileList.appendChild(row);
   });
@@ -1515,6 +1662,7 @@ btnClearFiles.addEventListener('click', clearSelectedFiles);
 
 function clearSelectedFiles() {
   selectedFiles = [];
+  sentFileKeys = new Set();
   inputFile.value = '';
   fileList.innerHTML = '';
   fileDetails.classList.add('hidden');

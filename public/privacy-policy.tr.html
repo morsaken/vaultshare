@@ -63,9 +63,9 @@
   <p>İki cihazın birbirini bulabilmesi için uygulama, sizin veya dağıtıcınız tarafından seçilen bir
   <strong>sinyalleşme sunucusuna</strong> (hafif bir aktarıcı) bağlanır. Sinyalleşme sunucusu:</p>
   <ul>
-    <li>İki tarafın doğrudan bir bağlantı açmak için gereken bilgileri (oda kodu ve her tarafın <strong>açık ECDH anahtarı</strong> ile ağ adayları dâhil olmak üzere açık bağlantı ayrıntıları) değiş tokuş etmesine yardımcı olur.</li>
+    <li>İki tarafın doğrudan bir bağlantı açmak için gereken bilgileri (kanal kodu ve her tarafın <strong>açık ECDH anahtarı</strong> ile ağ adayları dâhil olmak üzere açık bağlantı ayrıntıları) değiş tokuş etmesine yardımcı olur.</li>
     <li>Dosya içeriklerinizi <strong>asla almaz</strong> ve özel anahtarlarınızı ya da türetilen oturum anahtarını <strong>asla almaz.</strong></li>
-    <li>Bağlantıyı yönlendirmek için teknik olarak gerekli olduğundan, bağlanan cihazların <strong>IP adresini</strong> ve kısa ömürlü <strong>oda kodunu</strong> zorunlu olarak görür. Bu bağlantı meta verisi yalnızca oturumu kurmak için kullanılır; sizi tanımlamak veya profillemek için tarafımızca kullanılmaz.</li>
+    <li>Bağlantıyı yönlendirmek için teknik olarak gerekli olduğundan, bağlanan cihazların <strong>IP adresini</strong> ve kısa ömürlü <strong>kanal kodunu</strong> zorunlu olarak görür. Bu bağlantı meta verisi yalnızca oturumu kurmak için kullanılır; sizi tanımlamak veya profillemek için tarafımızca kullanılmaz.</li>
   </ul>
   <p>Uygulamayı <strong>kendi barındırdığınız</strong> bir sinyalleşme sunucusuna yönlendirirseniz, o sunucu
   sizin (ya da onu işleten kişi) tarafından işletilir ve bağlantı meta verisini nasıl ele aldığı o işletmecinin
@@ -77,15 +77,16 @@
   yolu bulmasına yardımcı olmak için cihazın <strong>açık IP adresini</strong> öğrenir. Dosya içeriklerini veya
   şifreleme anahtarlarını almaz.</p>
   <p>Doğrudan eşler arası bir yol kurulamadığında (örneğin kısıtlayıcı ya da operatör düzeyinde NAT ağlarında),
-  uygulama bağlantıyı iki taraf arasında aktaran bir <strong>üçüncü taraf TURN aktarma sunucusuna</strong> geri
+  uygulama bağlantıyı iki taraf arasında aktaran, <strong>bizim işlettiğimiz bir TURN aktarma sunucusuna</strong> geri
   dönebilir. Trafik <strong>zaten uçtan uca şifreli</strong> olduğundan, aktarıcı yalnızca şifreli veriyi görür;
   <strong>açık IP adresinizi</strong> ve şifreli paketleri aktarır, ancak <strong>şifreleme anahtarlarınıza, dosya
-  içeriklerinize veya sohbet mesajlarınıza asla erişemez.</strong> STUN ve TURN sunucuları, kendi gizlilik
-  politikaları kapsamında üçüncü taraflarca işletilir.</p>
+  içeriklerinize veya sohbet mesajlarınıza asla erişemez.</strong> Herkese açık STUN sunucuları, kendi gizlilik
+  politikaları kapsamında üçüncü taraflarca işletilir; TURN aktarıcısı ise bizim tarafımızdan işletilir ve yalnızca
+  yukarıda açıklanan şifreli bağlantı meta verisini işler.</p>
 
   <h2>5. Kamera ve izinler</h2>
   <ul>
-    <li><strong>Kamera</strong> — tarayıcınız kamera erişimini <strong>yalnızca bir oda QR kodunu taramayı
+    <li><strong>Kamera</strong> — tarayıcınız kamera erişimini <strong>yalnızca bir kanal QR kodunu taramayı
     seçtiğinizde</strong> ister. Kamera görüntüsü <strong>yalnızca kodu okumak için, gerçek zamanlı olarak
     tarayıcınızda</strong> işlenir; <strong>hiçbir fotoğraf veya video kaydedilmez, saklanmaz ya da iletilmez.</strong>
     Bunu istediğiniz zaman tarayıcınızın site ayarlarından reddedebilir veya geri alabilirsiniz.</li>
