@@ -29,6 +29,7 @@ const progressEta = document.getElementById('progress-eta');
 const btnClearLogs = document.getElementById('btn-clear-logs');
 const logConsole = document.getElementById('log-console');
 const sectionChat = document.getElementById('section-chat');
+const connectionError = document.getElementById('connection-error');
 const chatMessages = document.getElementById('chat-messages');
 const chatForm = document.getElementById('chat-form');
 const chatInput = document.getElementById('chat-input');
@@ -61,6 +62,9 @@ let fileMetadata = null;
 let isTransferring = false;
 // The file currently being streamed out (used for send-side progress/ETA).
 let activeSendFile = null;
+// Whether the P2P channel has connected at least once this negotiation — used to
+// tell "couldn't connect at all" (show red notice) from "connected then dropped".
+let everConnected = false;
 // --- Resumable transfers ---
 // Partially-received files stashed by content hash when a transfer is
 // interrupted (peer drop), so a re-send resumes from the first missing chunk.
@@ -522,6 +526,8 @@ async function setupWebRTC() {
     log(`ICE connection state changed: ${peerConnection.iceConnectionState}`, 'p2p');
     if (peerConnection.iceConnectionState === 'connected') {
       log('Direct WebRTC peer connection established!', 'p2p');
+      everConnected = true;
+      connectionError.classList.add('hidden');
       textChannelStatus.innerText = t('status.tunnelActive');
       sectionTransfer.classList.remove('hidden');
       // Chat rides the same encrypted channel and is available as soon as the
@@ -532,7 +538,14 @@ async function setupWebRTC() {
     } else if (peerConnection.iceConnectionState === 'failed' || peerConnection.iceConnectionState === 'disconnected') {
       // P2P tunnel dropped — stay in the room and wait for the peer to
       // reconnect (re-handshake), consistent with the signaling peer-left path.
-      log('WebRTC connection dropped. Waiting for peer to reconnect...', 'error');
+      if (!everConnected) {
+        // Never established a channel — negotiation failure (commonly no reachable
+        // TURN/relay). Surface a red notice; the transfer/chat panels stay hidden.
+        log('Could not establish the secure P2P connection.', 'error');
+        connectionError.classList.remove('hidden');
+      } else {
+        log('WebRTC connection dropped. Waiting for peer to reconnect...', 'error');
+      }
       resetSecureSession();
     }
   };
@@ -1408,6 +1421,8 @@ function showConnectionUI(room) {
   setRoomQrVisible(true);
   sectionSetup.classList.add('hidden');
   sectionConnection.classList.remove('hidden');
+  connectionError.classList.add('hidden');
+  everConnected = false;
   chkVerified.checked = false;
   peerVerified = false;
   updateVerifyBadges();
@@ -1475,6 +1490,7 @@ function resetSecureSession() {
   updateVerifyBadges();
   incomingQueue = Promise.resolve();
   peerSupportsResume = null; // unknown until the new peer answers
+  everConnected = false; // the next handshake is a fresh negotiation
 
   // Preserve any partially-received file so it resumes when the peer rejoins.
   stashPartialReceive();
@@ -1525,6 +1541,8 @@ function resetConnection() {
   // Drop any in-flight packet processing chain.
   incomingQueue = Promise.resolve();
   peerSupportsResume = null;
+  everConnected = false;
+  connectionError.classList.add('hidden');
   // Leaving the room entirely — discard any saved partials (no resume across rooms).
   partials.clear();
 

@@ -68,6 +68,7 @@ const translations = {
     'status.verifyBoth': 'Verify the security code on both clients to continue.',
     'status.waitingOtherPeer': 'Waiting for the other peer to join this channel...',
     'status.peerDisconnected': 'Peer disconnected. Waiting for peer to reconnect...',
+    'status.connectionFailed': 'Could not establish a secure connection with your peer. Your networks may be blocking the direct link. Check your connection and try rejoining the channel.',
 
     'progress.complete': 'Transfer Complete!',
     'progress.batchLabel': 'File {index}/{count}: ',
@@ -158,6 +159,7 @@ const translations = {
     'status.verifyBoth': 'Devam etmek için güvenlik kodunu her iki istemcide de doğrulayın.',
     'status.waitingOtherPeer': 'Karşı tarafın bu kanala katılması bekleniyor...',
     'status.peerDisconnected': 'Karşı tarafın bağlantısı kesildi. Yeniden bağlanması bekleniyor...',
+    'status.connectionFailed': 'Karşı tarafla güvenli bağlantı kurulamadı. Ağlarınız doğrudan bağlantıyı engelliyor olabilir. Bağlantınızı kontrol edip kanala yeniden katılmayı deneyin.',
 
     'progress.complete': 'Aktarım Tamamlandı!',
     'progress.batchLabel': 'Dosya {index}/{count}: ',
