@@ -1462,6 +1462,11 @@ function renderRoomQr(room) {
 function setRoomQrVisible(visible) {
   const wrap = document.querySelector('.room-qr-wrapper');
   if (wrap) wrap.classList.toggle('hidden', !visible);
+  // The QR is shown only while waiting for a peer; the verification code and
+  // its badges are meaningless until a peer is connected, so they mirror the
+  // QR inversely — hidden whenever the QR is up.
+  const fp = document.getElementById('fingerprint-wrapper');
+  if (fp) fp.classList.toggle('hidden', visible);
 }
 
 function toggleInputStates(disable) {
