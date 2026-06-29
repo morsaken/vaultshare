@@ -669,10 +669,13 @@ async function sendFile() {
   setTimeout(() => {
     isTransferring = false;
     activeSendFile = null;
-    toggleInputStates(false);
     progressContainer.classList.add('hidden');
     // Keep the queue + "sent" markers so sent files stay listed (marked as sent)
-    // until the user leaves the room — matches the mobile app.
+    // until the user leaves the room — matches the mobile app. Drop the sent
+    // files to the bottom so any unsent ones lead the list, then refresh state:
+    // Send disables itself once nothing unsent remains.
+    reorderSentFilesToBottom();
+    toggleInputStates(false);
     renderFileList();
   }, 2000);
 }
@@ -1479,7 +1482,19 @@ function toggleInputStates(disable) {
   const lock = disable || !chkVerified.checked || !peerVerified;
   dropzone.style.pointerEvents = lock ? 'none' : 'auto';
   dropzone.style.opacity = lock ? '0.5' : '1';
-  btnSendFile.disabled = lock;
+  refreshSendButtonState();
+}
+
+// Single source of truth for the Send button. On top of the verification/
+// transfer locks, it stays disabled whenever every queued file has already been
+// sent this session — so a completed batch can't be re-sent. Adding a new
+// (unsent) file re-enables it.
+function refreshSendButtonState() {
+  const hasUnsent = selectedFiles.some(
+    (f) => !sentFileKeys.has(`${f.name}|${f.size}`)
+  );
+  btnSendFile.disabled =
+    isTransferring || !chkVerified.checked || !peerVerified || !hasUnsent;
 }
 
 // Peer dropped, but we stay in the room and wait for them to reconnect. This
@@ -1708,6 +1723,19 @@ function renderFileList() {
   });
 
   fileDetails.classList.remove('hidden');
+  refreshSendButtonState();
+}
+
+// Push already-sent files to the bottom of the queue so any remaining unsent
+// files surface at the top. Stable within each group, so relative order is kept.
+function reorderSentFilesToBottom() {
+  const unsent = selectedFiles.filter(
+    (f) => !sentFileKeys.has(`${f.name}|${f.size}`)
+  );
+  const sent = selectedFiles.filter((f) =>
+    sentFileKeys.has(`${f.name}|${f.size}`)
+  );
+  selectedFiles = [...unsent, ...sent];
 }
 
 function removeFile(index) {
