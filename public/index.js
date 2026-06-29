@@ -1288,6 +1288,8 @@ btnJoinRoom.addEventListener('click', () => {
   const val = normalizeRoomId(inputRoomId.value);
   if (!val) {
     alert(t('alert.invalidRoom'));
+    // Send the user straight to the field they need to fix.
+    inputRoomId.focus();
     return;
   }
   // Reflect the canonical form back to the user so it's clear what they joined.
