@@ -65,6 +65,11 @@ let activeSendFile = null;
 // Whether the P2P channel has connected at least once this negotiation — used to
 // tell "couldn't connect at all" (show red notice) from "connected then dropped".
 let everConnected = false;
+// Deterministic ceiling on the initial WebRTC negotiation. ICE doesn't always
+// reach a clean `failed` state when the direct link is blocked (it can stall in
+// `checking` indefinitely), so if the tunnel hasn't come up within this window
+// we surface the connection-failed notice ourselves.
+let handshakeTimer = null;
 // --- Resumable transfers ---
 // Partially-received files stashed by content hash when a transfer is
 // interrupted (peer drop), so a re-send resumes from the first missing chunk.
@@ -342,6 +347,9 @@ function initSignaling() {
           // rejoins, the server re-pairs us and the handshake restarts.
           log('Peer disconnected. Secure session reset — waiting for peer to reconnect...', 'error');
           resetSecureSession();
+          // Clear any stale "couldn't establish the connection" notice — with the
+          // peer gone, the status line ("waiting for peer") tells the real story.
+          connectionError.classList.add('hidden');
           break;
           
         case 'signal':
@@ -504,7 +512,8 @@ async function setupWebRTC() {
   // (STUN-only fallback if unreachable). Awaited before the peer connection so
   // the relay is available for the first ICE gathering.
   peerConnection = new RTCPeerConnection(await getRtcConfig());
-  
+  startHandshakeTimer();
+
   peerConnection.onicecandidate = async (e) => {
     if (e.candidate) {
       log('Local ICE candidate gathered. Encrypting & sending...', 'p2p');
@@ -527,6 +536,7 @@ async function setupWebRTC() {
     if (peerConnection.iceConnectionState === 'connected') {
       log('Direct WebRTC peer connection established!', 'p2p');
       everConnected = true;
+      clearHandshakeTimer();
       connectionError.classList.add('hidden');
       textChannelStatus.innerText = t('status.tunnelActive');
       sectionTransfer.classList.remove('hidden');
@@ -1470,7 +1480,30 @@ function toggleInputStates(disable) {
 // the (now dead) P2P connection — without leaving the room or returning to the
 // setup screen. When the peer rejoins, the server re-pairs us and the handshake
 // runs again from scratch, deriving a fresh key.
+// Arm the overall handshake deadline. If the tunnel hasn't come up by the time
+// it fires, the negotiation has stalled (commonly a blocked direct link / no
+// reachable relay) without ICE ever reporting a clean `failed`, so we surface
+// the connection-failed notice and tear the half-open session down.
+function startHandshakeTimer() {
+  clearHandshakeTimer();
+  handshakeTimer = setTimeout(() => {
+    handshakeTimer = null;
+    if (everConnected || !peerConnection) return; // tunnel came up / already gone
+    log('Secure P2P connection timed out before the tunnel opened.', 'error');
+    connectionError.classList.remove('hidden');
+    resetSecureSession();
+  }, 12000);
+}
+
+function clearHandshakeTimer() {
+  if (handshakeTimer !== null) {
+    clearTimeout(handshakeTimer);
+    handshakeTimer = null;
+  }
+}
+
 function resetSecureSession() {
+  clearHandshakeTimer();
   if (peerConnection) {
     peerConnection.close();
     peerConnection = null;
@@ -1511,6 +1544,7 @@ function resetSecureSession() {
 }
 
 function resetConnection() {
+  clearHandshakeTimer();
   log('Closing connection. Resetting cryptographic state...', 'system');
 
   // Tell the signaling server we're leaving so it removes us from the room.
