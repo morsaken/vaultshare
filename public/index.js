@@ -20,6 +20,9 @@ const fileList = document.getElementById('file-list');
 const fileListSummary = document.getElementById('file-list-summary');
 const btnClearFiles = document.getElementById('btn-clear-files');
 const btnSendFile = document.getElementById('btn-send-file');
+const sentDetails = document.getElementById('sent-details');
+const sentList = document.getElementById('sent-list');
+const btnClearSent = document.getElementById('btn-clear-sent');
 const progressContainer = document.getElementById('progress-container');
 const progressStatus = document.getElementById('progress-status');
 const progressPercent = document.getElementById('progress-percent');
@@ -70,6 +73,18 @@ let everConnected = false;
 // `checking` indefinitely), so if the tunnel hasn't come up within this window
 // we surface the connection-failed notice ourselves.
 let handshakeTimer = null;
+// Grace period for a transient ICE `disconnected`. ICE frequently blips into
+// `disconnected` (NAT keep-alive refresh, candidate re-validation, network
+// jitter) and recovers on its own a few seconds later — often right as the user
+// is verifying the code. Instead of tearing the whole session down on the first
+// blip (the old behavior), we wait this out and only reset if it never recovers.
+let iceRecoveryTimer = null;
+// ICE candidates that arrive before the peer connection's remote description is
+// set. Signaling messages are handled concurrently and building the connection
+// awaits TURN credentials, so a candidate can land first — buffer it and flush
+// once the remote description is in, rather than dropping it (a dropped relay
+// candidate is why the first handshake sometimes failed until a rejoin).
+let pendingCandidates = [];
 // --- Resumable transfers ---
 // Partially-received files stashed by content hash when a transfer is
 // interrupted (peer drop), so a re-send resumes from the first missing chunk.
@@ -466,8 +481,9 @@ async function handleSignal(payload) {
         if (!peerConnection) await setupWebRTC();
 
         await peerConnection.setRemoteDescription(new RTCSessionDescription(decrypted.sdp));
+        await flushPendingCandidates();
         log('Remote description set (offer). Creating WebRTC answer...', 'p2p');
-        
+
         const answer = await peerConnection.createAnswer();
         await peerConnection.setLocalDescription(answer);
         
@@ -478,14 +494,18 @@ async function handleSignal(payload) {
       } else if (decrypted.type === 'answer') {
         log('Received encrypted WebRTC answer. Finalizing peer connection...', 'p2p');
         await peerConnection.setRemoteDescription(new RTCSessionDescription(decrypted.sdp));
+        await flushPendingCandidates();
         log('Remote description set (answer). Handshake complete.', 'p2p');
-        
+
       } else if (decrypted.type === 'candidate') {
-        if (decrypted.candidate) {
+        if (!decrypted.candidate) return;
+        // Only addable once the remote description is set; otherwise buffer it and
+        // flush after setRemoteDescription so no early candidate is lost.
+        if (peerConnection && peerConnection.remoteDescription) {
           log('Received encrypted ICE candidate.', 'p2p');
-          if (peerConnection) {
-            await peerConnection.addIceCandidate(new RTCIceCandidate(decrypted.candidate));
-          }
+          await peerConnection.addIceCandidate(new RTCIceCandidate(decrypted.candidate));
+        } else {
+          pendingCandidates.push(decrypted.candidate);
         }
       }
     } catch (err) {
@@ -532,8 +552,11 @@ async function setupWebRTC() {
   peerConnection.oniceconnectionstatechange = () => {
     // A late event can fire after we've already torn down this connection.
     if (!peerConnection) return;
-    log(`ICE connection state changed: ${peerConnection.iceConnectionState}`, 'p2p');
-    if (peerConnection.iceConnectionState === 'connected') {
+    const state = peerConnection.iceConnectionState;
+    log(`ICE connection state changed: ${state}`, 'p2p');
+    if (state === 'connected' || state === 'completed') {
+      // (Re)connected — cancel any pending teardown and surface the tunnel.
+      clearIceRecoveryTimer();
       log('Direct WebRTC peer connection established!', 'p2p');
       everConnected = true;
       clearHandshakeTimer();
@@ -545,9 +568,22 @@ async function setupWebRTC() {
       sectionChat.classList.remove('hidden');
       // Start locked: the user must check the verification box before sending.
       toggleInputStates(false);
-    } else if (peerConnection.iceConnectionState === 'failed' || peerConnection.iceConnectionState === 'disconnected') {
-      // P2P tunnel dropped — stay in the room and wait for the peer to
-      // reconnect (re-handshake), consistent with the signaling peer-left path.
+    } else if (state === 'disconnected') {
+      // `disconnected` is transient: ICE blips here on NAT keep-alive refresh,
+      // candidate re-validation or network jitter and usually recovers on its
+      // own. Give it a grace period instead of dropping the session on the first
+      // blip; the recovery timer tears down only if it never comes back.
+      log('WebRTC connection interrupted — waiting for it to recover...', 'p2p');
+      // If the tunnel never came up, a `disconnected` means the initial
+      // negotiation is failing (commonly a blocked direct link / no reachable
+      // relay). Surface the red notice immediately; if ICE self-heals, the
+      // connected branch hides it again.
+      if (!everConnected) connectionError.classList.remove('hidden');
+      startIceRecoveryTimer();
+    } else if (state === 'failed' || state === 'closed') {
+      // Terminal — tear the secure session down but stay in the room and wait
+      // for the peer to reconnect (re-handshake), like the peer-left path.
+      clearIceRecoveryTimer();
       if (!everConnected) {
         // Never established a channel — negotiation failure (commonly no reachable
         // TURN/relay). Surface a red notice; the transfer/chat panels stay hidden.
@@ -670,11 +706,9 @@ async function sendFile() {
     isTransferring = false;
     activeSendFile = null;
     progressContainer.classList.add('hidden');
-    // Keep the queue + "sent" markers so sent files stay listed (marked as sent)
-    // until the user leaves the room — matches the mobile app. Drop the sent
-    // files to the bottom so any unsent ones lead the list, then refresh state:
-    // Send disables itself once nothing unsent remains.
-    reorderSentFilesToBottom();
+    // Keep the files (marked as sent) until the user leaves the room — matches
+    // the mobile app. renderFileList moves them into the separate "Sent files"
+    // box, clearing the selection box so the Send button drops away.
     toggleInputStates(false);
     renderFileList();
   }, 2000);
@@ -1524,8 +1558,52 @@ function clearHandshakeTimer() {
   }
 }
 
+// Start (or keep) the grace period for a transient ICE `disconnected`. If the
+// connection hasn't recovered to connected/completed by the time it fires, the
+// link is genuinely down, so we tear the secure session down (staying in the
+// room to wait for the peer to reconnect).
+function startIceRecoveryTimer() {
+  if (iceRecoveryTimer !== null) return;
+  iceRecoveryTimer = setTimeout(() => {
+    iceRecoveryTimer = null;
+    if (!peerConnection) return;
+    const state = peerConnection.iceConnectionState;
+    if (state === 'connected' || state === 'completed') return; // recovered
+    if (!everConnected) {
+      log('Could not establish the secure P2P connection.', 'error');
+      connectionError.classList.remove('hidden');
+    } else {
+      log('WebRTC connection did not recover. Waiting for peer to reconnect...', 'error');
+    }
+    resetSecureSession();
+  }, 12000);
+}
+
+function clearIceRecoveryTimer() {
+  if (iceRecoveryTimer !== null) {
+    clearTimeout(iceRecoveryTimer);
+    iceRecoveryTimer = null;
+  }
+}
+
+// Add any ICE candidates that arrived before the remote description was ready.
+async function flushPendingCandidates() {
+  if (!peerConnection || pendingCandidates.length === 0) return;
+  const buffered = pendingCandidates;
+  pendingCandidates = [];
+  for (const candidate of buffered) {
+    try {
+      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (err) {
+      log(`Failed to add buffered ICE candidate: ${err.message}`, 'error');
+    }
+  }
+}
+
 function resetSecureSession() {
+  pendingCandidates = [];
   clearHandshakeTimer();
+  clearIceRecoveryTimer();
   if (peerConnection) {
     peerConnection.close();
     peerConnection = null;
@@ -1567,6 +1645,8 @@ function resetSecureSession() {
 
 function resetConnection() {
   clearHandshakeTimer();
+  clearIceRecoveryTimer();
+  pendingCandidates = [];
   log('Closing connection. Resetting cryptographic state...', 'system');
 
   // Tell the signaling server we're leaving so it removes us from the room.
@@ -1671,22 +1751,39 @@ function handleFilesSelect(fileList) {
   if (added > 0) renderFileList();
 }
 
-function renderFileList() {
-  fileList.innerHTML = '';
+function fileKey(file) {
+  return `${file.name}|${file.size}`;
+}
 
-  if (selectedFiles.length === 0) {
+// Render the transfer panel as two separate boxes: not-yet-sent files in the
+// selection box (removable, with the Send button) and delivered files in a
+// distinct "Sent files" box. Splitting them clears the selection once a file is
+// sent, so there's no "did I already send this?" doubt and no accidental re-send.
+function renderFileList() {
+  const pending = selectedFiles.filter((f) => !sentFileKeys.has(fileKey(f)));
+  const sent = selectedFiles.filter((f) => sentFileKeys.has(fileKey(f)));
+  renderPendingFiles(pending);
+  renderSentFiles(sent);
+  refreshSendButtonState();
+}
+
+function renderPendingFiles(pending) {
+  fileList.innerHTML = '';
+  if (pending.length === 0) {
     fileDetails.classList.add('hidden');
     return;
   }
 
-  const totalBytes = selectedFiles.reduce((sum, f) => sum + f.size, 0);
-  const summaryKey = selectedFiles.length === 1 ? 'files.summaryOne' : 'files.summaryMany';
+  const totalBytes = pending.reduce((sum, f) => sum + f.size, 0);
+  const summaryKey = pending.length === 1 ? 'files.summaryOne' : 'files.summaryMany';
   fileListSummary.innerText = t(summaryKey, {
-    count: selectedFiles.length,
+    count: pending.length,
     size: formatFileSize(totalBytes)
   });
 
-  selectedFiles.forEach((file, index) => {
+  pending.forEach((file) => {
+    // Map back to the canonical index so removeFile() edits the right entry.
+    const index = selectedFiles.indexOf(file);
     const row = document.createElement('div');
     row.className = 'file-info-row';
     row.innerHTML = `
@@ -1707,35 +1804,46 @@ function renderFileList() {
         </svg>
       </button>`;
     row.querySelector('.file-name').innerText = file.name;
-    const sizeEl = row.querySelector('.file-size');
-    sizeEl.innerText = formatFileSize(file.size);
-    // Mark files already sent this session so they stay visibly "sent" in the
-    // queue until the user leaves the room.
-    if (sentFileKeys.has(`${file.name}|${file.size}`)) {
-      row.classList.add('file-info-row-sent');
-      const badge = document.createElement('span');
-      badge.className = 'file-sent-badge';
-      badge.innerText = `  ✓ ${t('files.sent')}`;
-      sizeEl.appendChild(badge);
-    }
+    row.querySelector('.file-size').innerText = formatFileSize(file.size);
     row.querySelector('.btn-close').addEventListener('click', () => removeFile(index));
     fileList.appendChild(row);
   });
 
   fileDetails.classList.remove('hidden');
-  refreshSendButtonState();
 }
 
-// Push already-sent files to the bottom of the queue so any remaining unsent
-// files surface at the top. Stable within each group, so relative order is kept.
-function reorderSentFilesToBottom() {
-  const unsent = selectedFiles.filter(
-    (f) => !sentFileKeys.has(`${f.name}|${f.size}`)
-  );
-  const sent = selectedFiles.filter((f) =>
-    sentFileKeys.has(`${f.name}|${f.size}`)
-  );
-  selectedFiles = [...unsent, ...sent];
+function renderSentFiles(sent) {
+  sentList.innerHTML = '';
+  if (sent.length === 0) {
+    sentDetails.classList.add('hidden');
+    return;
+  }
+
+  sent.forEach((file) => {
+    const row = document.createElement('div');
+    row.className = 'file-info-row file-info-row-sent';
+    row.innerHTML = `
+      <div class="file-info-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
+          <polyline points="13 2 13 9 20 9"/>
+        </svg>
+      </div>
+      <div class="file-info-text">
+        <div class="file-name"></div>
+        <div class="file-size"></div>
+      </div>`;
+    row.querySelector('.file-name').innerText = file.name;
+    const sizeEl = row.querySelector('.file-size');
+    sizeEl.innerText = formatFileSize(file.size);
+    const badge = document.createElement('span');
+    badge.className = 'file-sent-badge';
+    badge.innerText = `  ✓ ${t('files.sent')}`;
+    sizeEl.appendChild(badge);
+    sentList.appendChild(row);
+  });
+
+  sentDetails.classList.remove('hidden');
 }
 
 function removeFile(index) {
@@ -1745,14 +1853,33 @@ function removeFile(index) {
   renderFileList();
 }
 
-btnClearFiles.addEventListener('click', clearSelectedFiles);
+// Pending box "Clear all": drop only the not-yet-sent files; the sent history
+// stays put in its own box.
+btnClearFiles.addEventListener('click', clearPendingFiles);
 
+function clearPendingFiles() {
+  if (isTransferring) return;
+  selectedFiles = selectedFiles.filter((f) => sentFileKeys.has(fileKey(f)));
+  inputFile.value = '';
+  renderFileList();
+}
+
+// Sent box "Clear": drop the sent history; any pending selection stays put.
+btnClearSent.addEventListener('click', clearSentFiles);
+
+function clearSentFiles() {
+  if (isTransferring) return;
+  selectedFiles = selectedFiles.filter((f) => !sentFileKeys.has(fileKey(f)));
+  sentFileKeys = new Set();
+  renderFileList();
+}
+
+// Full wipe of both boxes — used when the session resets (peer left / leave room).
 function clearSelectedFiles() {
   selectedFiles = [];
   sentFileKeys = new Set();
   inputFile.value = '';
-  fileList.innerHTML = '';
-  fileDetails.classList.add('hidden');
+  renderFileList();
 }
 
 btnSendFile.addEventListener('click', sendFile);

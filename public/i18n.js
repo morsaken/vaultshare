@@ -42,7 +42,9 @@ const translations = {
     'transfer.dropMain': 'Drag & drop files here or <span>browse files</span>',
     'transfer.dropSub': 'Files are encrypted locally in-memory before leaving your device.',
     'transfer.clearAll': 'Clear all',
+    'transfer.clear': 'Clear',
     'transfer.send': 'Send Encrypted Files',
+    'transfer.sentTitle': 'Sent files',
 
     'chat.title': 'Secure Chat',
     'chat.desc': 'Messages are end-to-end encrypted and sent directly to your peer over the P2P channel.',
@@ -133,7 +135,9 @@ const translations = {
     'transfer.dropMain': 'Dosyaları buraya sürükleyip bırakın ya da <span>dosyalara göz atın</span>',
     'transfer.dropSub': 'Dosyalar, cihazınızdan ayrılmadan önce bellekte yerel olarak şifrelenir.',
     'transfer.clearAll': 'Tümünü temizle',
+    'transfer.clear': 'Temizle',
     'transfer.send': 'Şifreli Dosyaları Gönder',
+    'transfer.sentTitle': 'Gönderilen dosyalar',
 
     'chat.title': 'Güvenli Sohbet',
     'chat.desc': 'Mesajlar uçtan uca şifrelenir ve P2P kanalı üzerinden doğrudan karşı tarafa gönderilir.',

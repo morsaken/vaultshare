@@ -141,7 +141,7 @@
           </div>
         </div>
 
-        <!-- SELECTED FILE DETAILS -->
+        <!-- SELECTED (PENDING) FILE DETAILS -->
         <div id="file-details" class="file-details hidden">
           <div class="file-list-header">
             <span id="file-list-summary" class="file-list-summary">0 files selected</span>
@@ -149,6 +149,16 @@
           </div>
           <div id="file-list" class="file-list"></div>
           <button id="btn-send-file" class="btn btn-primary btn-block" data-i18n="transfer.send">Send Encrypted Files</button>
+        </div>
+
+        <!-- SENT FILES (moved here once delivered, so the selection box clears
+             and there's no "did I already send this?" doubt) -->
+        <div id="sent-details" class="file-details hidden">
+          <div class="file-list-header">
+            <span class="file-list-summary" data-i18n="transfer.sentTitle">Sent files</span>
+            <button id="btn-clear-sent" class="btn-text" data-i18n="transfer.clear">Clear</button>
+          </div>
+          <div id="sent-list" class="file-list"></div>
         </div>
 
         <!-- PROGRESS BAR -->

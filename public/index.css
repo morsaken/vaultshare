@@ -287,6 +287,23 @@ h1 {
   transition: var(--transition-smooth);
 }
 
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  box-shadow: none;
+  filter: grayscale(0.4);
+}
+
+/* Don't lift/highlight a disabled button on hover. */
+.btn:disabled:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-primary:disabled:hover {
+  background-color: var(--primary);
+}
+
 .btn-primary {
   background-color: var(--primary);
   color: white;
