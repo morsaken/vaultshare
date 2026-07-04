@@ -103,6 +103,22 @@ let receiverResetTimer = null;
 // Serializes async processing of incoming P2P packets so handlers for
 // consecutive messages don't interleave (see setupDataChannel).
 let incomingQueue = Promise.resolve();
+// Serializes signaling events (peer-joined / peer-left / signal) the same way.
+// Their handlers are async — setupWebRTC awaits TURN credentials for seconds —
+// and the raw WebSocket fires them concurrently, so two in-flight handlers
+// could each build a peer connection and double-send offers. The loser's answer
+// then arrives on a connection already in the `stable` state ("Failed to set
+// remote answer sdp: Called in wrong state: stable") and the handshake
+// collapses. One-at-a-time processing keeps the negotiation strictly ordered.
+let signalQueue = Promise.resolve();
+
+// Append a signaling event to the serial queue. The .catch keeps the queue
+// alive if a handler rejects, so one bad message can't wedge everything after.
+function enqueueSignalTask(task) {
+  signalQueue = signalQueue
+    .then(task)
+    .catch((err) => log(`Error handling signal: ${err.message}`, 'error'));
+}
 
 // ICE server configuration.
 // STUN handles direct paths (same Wi-Fi/LAN, typical home routers). TURN (a
@@ -341,34 +357,38 @@ function initSignaling() {
           break;
           
         case 'peer-joined':
-          log('Peer connected to room. Initiating key exchange...', 'p2p');
-          // The server tells us our handshake role on every pairing, so a
-          // reconnect after a drop restarts cleanly (no two-non-initiator stall).
-          isInitiator = !!msg.initiator;
-          textChannelStatus.innerText = t('status.keyExchange');
+          enqueueSignalTask(async () => {
+            log('Peer connected to room. Initiating key exchange...', 'p2p');
+            // The server tells us our handshake role on every pairing, so a
+            // reconnect after a drop restarts cleanly (no two-non-initiator stall).
+            isInitiator = !!msg.initiator;
+            textChannelStatus.innerText = t('status.keyExchange');
 
-          // Generate key pair and send public key to peer
-          await generateECDHKeyPair();
-          const exportedPub = await window.crypto.subtle.exportKey('raw', myKeyPair.publicKey);
-          sendSignal({
-            type: 'ecdh-pub',
-            key: arrayBufferToBase64(exportedPub)
+            // Generate key pair and send public key to peer
+            await generateECDHKeyPair();
+            const exportedPub = await window.crypto.subtle.exportKey('raw', myKeyPair.publicKey);
+            sendSignal({
+              type: 'ecdh-pub',
+              key: arrayBufferToBase64(exportedPub)
+            });
           });
           break;
 
         case 'peer-left':
-          // Peer dropped, but we stay in the room and wait for them to
-          // reconnect. Only the secure session is torn down; when the peer
-          // rejoins, the server re-pairs us and the handshake restarts.
-          log('Peer disconnected. Secure session reset — waiting for peer to reconnect...', 'error');
-          resetSecureSession();
-          // Clear any stale "couldn't establish the connection" notice — with the
-          // peer gone, the status line ("waiting for peer") tells the real story.
-          connectionError.classList.add('hidden');
+          enqueueSignalTask(() => {
+            // Peer dropped, but we stay in the room and wait for them to
+            // reconnect. Only the secure session is torn down; when the peer
+            // rejoins, the server re-pairs us and the handshake restarts.
+            log('Peer disconnected. Secure session reset — waiting for peer to reconnect...', 'error');
+            resetSecureSession();
+            // Clear any stale "couldn't establish the connection" notice — with the
+            // peer gone, the status line ("waiting for peer") tells the real story.
+            connectionError.classList.add('hidden');
+          });
           break;
-          
+
         case 'signal':
-          await handleSignal(msg.payload);
+          enqueueSignalTask(() => handleSignal(msg.payload));
           break;
 
         case 'turn-credentials':
@@ -477,8 +497,19 @@ async function handleSignal(payload) {
       const decrypted = await decryptPayload(payload.data);
       
       if (decrypted.type === 'offer') {
+        // Glare guard: the server assigns exactly one initiator per pairing and
+        // only the initiator creates offers. If we're the (current) initiator,
+        // an incoming offer is a stale leftover from an older pairing — the
+        // peer will answer OUR offer; applying theirs would corrupt the state.
+        if (isInitiator) {
+          log('Ignoring stale WebRTC offer (we are the initiator).', 'p2p');
+          return;
+        }
         log('Received encrypted WebRTC offer. Configuring peer connection...', 'p2p');
-        if (!peerConnection) await setupWebRTC();
+        // An offer always starts a fresh negotiation (the initiator creates
+        // exactly one offer per peer connection), so any connection we still
+        // hold is stale — setupWebRTC tears it down before building the new one.
+        await setupWebRTC();
 
         await peerConnection.setRemoteDescription(new RTCSessionDescription(decrypted.sdp));
         await flushPendingCandidates();
@@ -486,12 +517,23 @@ async function handleSignal(payload) {
 
         const answer = await peerConnection.createAnswer();
         await peerConnection.setLocalDescription(answer);
-        
+
         const encryptedAnswer = await encryptPayload({ type: 'answer', sdp: answer });
         sendSignal({ type: 'webrtc-handshake', data: encryptedAnswer });
         log('Sent encrypted WebRTC answer.', 'p2p');
-        
+
       } else if (decrypted.type === 'answer') {
+        // Only meaningful while our own offer is pending. Anything else is a
+        // stale or duplicate answer (e.g. for an offer we've since replaced);
+        // applying it throws "Called in wrong state: stable" and used to kill
+        // the rest of the handshake — just drop it.
+        if (!peerConnection || peerConnection.signalingState !== 'have-local-offer') {
+          log(
+            `Ignoring stale WebRTC answer (signaling state: ${peerConnection ? peerConnection.signalingState : 'no connection'}).`,
+            'p2p'
+          );
+          return;
+        }
         log('Received encrypted WebRTC answer. Finalizing peer connection...', 'p2p');
         await peerConnection.setRemoteDescription(new RTCSessionDescription(decrypted.sdp));
         await flushPendingCandidates();
@@ -527,6 +569,26 @@ async function decryptPayload(ciphertextBase64) {
 
 // --- WebRTC P2P Manager ---
 async function setupWebRTC() {
+  // A new handshake supersedes any existing connection (duplicate ecdh-pub
+  // after a re-pair, or a fresh offer from a rebuilt initiator). Tear the old
+  // one down first — keeping it alive would race two negotiations over one
+  // signaling channel, and the loser's answer lands in the `stable` state.
+  if (peerConnection) {
+    log('Discarding previous peer connection for a new handshake...', 'p2p');
+    const old = peerConnection;
+    peerConnection = null;
+    // Detach handlers so the old connection's dying events (icecandidate,
+    // state changes) can't fire into the new negotiation's state.
+    old.onicecandidate = null;
+    old.oniceconnectionstatechange = null;
+    old.ondatachannel = null;
+    old.close();
+    if (dataChannel) {
+      dataChannel.close();
+      dataChannel = null;
+    }
+    pendingCandidates = [];
+  }
   log('Initializing RTCPeerConnection...', 'p2p');
   // Fetch fresh, time-limited TURN credentials from this origin's server
   // (STUN-only fallback if unreachable). Awaited before the peer connection so
@@ -591,7 +653,7 @@ async function setupWebRTC() {
       } else {
         log('WebRTC connection dropped. Waiting for peer to reconnect...', 'error');
       }
-      resetSecureSession();
+      handleP2PFailure();
     }
   };
   
@@ -1585,8 +1647,25 @@ function startIceRecoveryTimer() {
     } else {
       log('WebRTC connection did not recover. Waiting for peer to reconnect...', 'error');
     }
-    resetSecureSession();
+    handleP2PFailure();
   }, 12000);
+}
+
+// The P2P link died (ICE failed / recovery timed out) while the signaling
+// socket may still be up. Reset the secure session — and, if the link had been
+// up and we're still paired in the room, rejoin it. The server treats a join as
+// leave+rejoin, so it fires peer-left/peer-joined at the peer and re-pairs us,
+// restarting the handshake. Without this, both sides sit waiting for a
+// 'peer-joined' that never comes (the server still sees the room as paired) and
+// a mid-session drop never self-heals.
+function handleP2PFailure() {
+  const rejoin =
+    everConnected && roomId && ws && ws.readyState === WebSocket.OPEN;
+  resetSecureSession();
+  if (rejoin) {
+    log('Rejoining room to restart the secure session...', 'p2p');
+    sendWS({ type: 'join', roomId });
+  }
 }
 
 function clearIceRecoveryTimer() {
