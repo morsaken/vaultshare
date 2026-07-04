@@ -562,10 +562,9 @@ async function setupWebRTC() {
       clearHandshakeTimer();
       connectionError.classList.add('hidden');
       textChannelStatus.innerText = t('status.tunnelActive');
-      sectionTransfer.classList.remove('hidden');
-      // Chat rides the same encrypted channel and is available as soon as the
-      // tunnel is up (no file-verification gate), so peers can coordinate.
-      sectionChat.classList.remove('hidden');
+      // Transfer and chat stay hidden until BOTH peers confirm the security
+      // code — nothing is exchanged over an unverified channel.
+      updateSecureSectionsVisibility();
       // Start locked: the user must check the verification box before sending.
       toggleInputStates(false);
     } else if (state === 'disconnected') {
@@ -1021,9 +1020,10 @@ async function handleIncomingData(arrayBuffer) {
     return;
   }
 
-  // Chat (0x06) is handled before the file-verification gate so peers can
-  // message as soon as the encrypted tunnel is up. Still E2EE; just not subject
-  // to the "verify before receiving files" lock.
+  // Chat (0x06) is handled before the file-verification gate. The chat panel is
+  // only shown once both peers verify, so this mainly covers messages already in
+  // flight when a side clears its verification — they land in the (hidden)
+  // history instead of being dropped.
   if (type === 0x06) {
     try {
       const decrypted = await window.crypto.subtle.decrypt(
@@ -1448,8 +1448,18 @@ function updateVerifyBadges() {
   badgePeerVerified.classList.toggle('verified', peerVerified);
 }
 
+// The transfer and chat panels only exist over a channel both peers have
+// explicitly verified: shown once the tunnel is up AND both sides confirmed
+// the security code, hidden again the moment either side clears it.
+function updateSecureSectionsVisibility() {
+  const show = everConnected && chkVerified.checked && peerVerified;
+  sectionTransfer.classList.toggle('hidden', !show);
+  sectionChat.classList.toggle('hidden', !show);
+}
+
 function refreshVerificationStatus() {
   updateVerifyBadges();
+  updateSecureSectionsVisibility();
   if (!aesKey) return;
   if (chkVerified.checked && peerVerified) {
     textChannelStatus.innerText = t('status.bothVerified');
