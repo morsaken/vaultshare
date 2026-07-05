@@ -122,9 +122,20 @@ let peerSupportsResume = null;
 const ACK_EVERY = 8;
 const SEND_WINDOW = 32;
 const ACK_TIMEOUT_MS = 15000;
+// Until the peer's FIRST ack we don't know whether it acks at all (older
+// clients never do). Sending unthrottled until then is exactly the flood the
+// window exists to prevent, so the sender only gets a bounded head start; if
+// it runs out with no ack ever seen, a short probe decides between "legacy
+// peer, run unwindowed" and "modern peer, keep waiting".
+const INITIAL_WINDOW = 64;
+const ACK_PROBE_TIMEOUT_MS = 2000;
 let lastAckedChunk = 0; // highest processed-chunk count acked for current file
 let peerSendsAcks = false; // becomes true on the first 0x09 from this peer
+let peerNeverAcks = false; // true once an ack probe timed out (legacy peer)
 let ackResolve = null; // resolves the sender's pending window wait
+// Receiver side: processed count at the start of the current file (the resume
+// offset), so the first-chunk ack fires even on a resumed transfer.
+let recvStartCount = 0;
 // Pending receiver reset; cleared when a back-to-back file starts arriving.
 let receiverResetTimer = null;
 // Serializes async processing of incoming P2P packets so handlers for
@@ -857,7 +868,7 @@ function waitForResume(totalChunks) {
 // Wait for the next flow-control ack (or a transfer reset, which also resolves
 // the pending wait so the send loop can unwind). Resolves false only on
 // timeout — a windowed receiver that stops acking is gone.
-function waitForAck() {
+function waitForAck(timeoutMs = ACK_TIMEOUT_MS) {
   return new Promise((resolve) => {
     let settled = false;
     const finish = (ok) => {
@@ -867,7 +878,7 @@ function waitForAck() {
       clearTimeout(timer);
       resolve(ok);
     };
-    const timer = setTimeout(() => finish(false), ACK_TIMEOUT_MS);
+    const timer = setTimeout(() => finish(false), timeoutMs);
     ackResolve = finish;
   });
 }
@@ -962,17 +973,28 @@ async function sendSingleFile(file, fileIndex, fileCount) {
       });
     }
 
-    // Receiver-paced flow control: once the peer has acked anything, never run
-    // more than SEND_WINDOW chunks ahead of what it has PROCESSED. The SCTP
-    // buffer check above can't see past the native buffers into a receiver
-    // (the mobile client) whose per-chunk decrypt is slower than the network.
-    while (peerSendsAcks && isTransferring && i - lastAckedChunk >= SEND_WINDOW) {
-      const acked = await waitForAck();
-      if (!acked) {
-        log(`${tag} Receiver stopped acknowledging chunks. Transfer aborted.`, 'error');
-        resetTransferState(true);
-        return false;
+    // Receiver-paced flow control: never run more than SEND_WINDOW chunks
+    // ahead of what the receiver has PROCESSED. The SCTP buffer check above
+    // can't see past the native buffers into a receiver (the mobile client)
+    // whose per-chunk decrypt is slower than the network. Before the peer's
+    // first ack the window is wider (INITIAL_WINDOW) but NOT infinite: a
+    // legacy peer that never acks is detected with one short probe.
+    while (
+      isTransferring &&
+      !peerNeverAcks &&
+      i - lastAckedChunk >= (peerSendsAcks ? SEND_WINDOW : INITIAL_WINDOW)
+    ) {
+      const acked = await waitForAck(peerSendsAcks ? ACK_TIMEOUT_MS : ACK_PROBE_TIMEOUT_MS);
+      if (acked) continue;
+      if (!peerSendsAcks) {
+        // No ack ever arrived — old client that predates flow control.
+        peerNeverAcks = true;
+        log(`${tag} Peer does not send flow-control acks; sending unwindowed.`, 'p2p');
+        break;
       }
+      log(`${tag} Receiver stopped acknowledging chunks. Transfer aborted.`, 'error');
+      resetTransferState(true);
+      return false;
     }
 
     if (!isTransferring) return false; // Transfer was cancelled
@@ -1216,6 +1238,7 @@ async function handleIncomingData(arrayBuffer) {
       const decrypted = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, ciphertext);
       const count = parseInt(new TextDecoder().decode(decrypted), 10);
       peerSendsAcks = true;
+      peerNeverAcks = false;
       if (Number.isFinite(count) && count > lastAckedChunk) lastAckedChunk = count;
       if (ackResolve) ackResolve(true);
     } catch (err) {
@@ -1275,6 +1298,7 @@ async function handleIncomingData(arrayBuffer) {
       partials.delete(fileMetadata.sha256);
 
       totalBytesTransferred = resumeFrom * (60 * 1024);
+      recvStartCount = resumeFrom;
       startTime = Date.now();
       isTransferring = true;
       toggleInputStates(true);
@@ -1298,8 +1322,10 @@ async function handleIncomingData(arrayBuffer) {
       updateProgress(chunksLoaded, expectedTotalChunks, receiveLabel());
 
       // Flow control: report our processed count so a windowed sender (the
-      // mobile client) never runs more than SEND_WINDOW ahead of us.
-      if (chunksLoaded % ACK_EVERY === 0) {
+      // mobile client) never runs more than SEND_WINDOW ahead of us. The
+      // FIRST processed chunk of each file is always acked, so the sender
+      // flips from the initial allowance to the tight window right away.
+      if (chunksLoaded === recvStartCount + 1 || chunksLoaded % ACK_EVERY === 0) {
         sendDataChannelControl(0x09, String(chunksLoaded));
       }
       
@@ -1936,6 +1962,7 @@ function resetSecureSession() {
   incomingQueue = Promise.resolve();
   peerSupportsResume = null; // unknown until the new peer answers
   peerSendsAcks = false;
+  peerNeverAcks = false;
   lastAckedChunk = 0;
   everConnected = false; // the next handshake is a fresh negotiation
 
@@ -1999,6 +2026,7 @@ function resetConnection() {
   incomingQueue = Promise.resolve();
   peerSupportsResume = null;
   peerSendsAcks = false;
+  peerNeverAcks = false;
   lastAckedChunk = 0;
   everConnected = false;
   connectionError.classList.add('hidden');
