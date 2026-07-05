@@ -70,6 +70,7 @@ const translations = {
     'status.verifyBoth': 'Verify the security code on both clients to continue.',
     'status.waitingOtherPeer': 'Waiting for the other peer to join this channel...',
     'status.peerDisconnected': 'Peer disconnected. Waiting for peer to reconnect...',
+    'status.reconnected': 'Reconnected securely — same verified peer.',
     'status.connectionFailed': 'Could not establish a secure connection with your peer. Your networks may be blocking the direct link. Check your connection and try rejoining the channel.',
 
     'progress.complete': 'Transfer Complete!',
@@ -92,6 +93,7 @@ const translations = {
     'alert.peerCancelled': 'The peer cancelled the transfer.',
     'alert.invalidRoom': 'Please enter a valid Channel ID.',
     'confirm.disconnect': 'Disconnect from current secure channel?',
+    'alert.resumeMismatch': 'The security code changed after reconnecting and could not be confirmed automatically. Compare and verify the new code manually.',
     'alert.cryptoUnavailable': 'Encryption unavailable: this app must be opened over HTTPS or via http://localhost. If you are testing across devices on a LAN IP, the browser disables the Web Crypto API on insecure origins, so the security code cannot be generated.',
 
     'files.summaryOne': '{count} file selected · {size}',
@@ -163,6 +165,7 @@ const translations = {
     'status.verifyBoth': 'Devam etmek için güvenlik kodunu her iki istemcide de doğrulayın.',
     'status.waitingOtherPeer': 'Karşı tarafın bu kanala katılması bekleniyor...',
     'status.peerDisconnected': 'Karşı tarafın bağlantısı kesildi. Yeniden bağlanması bekleniyor...',
+    'status.reconnected': 'Güvenli şekilde yeniden bağlanıldı — aynı doğrulanmış eş.',
     'status.connectionFailed': 'Karşı tarafla güvenli bağlantı kurulamadı. Ağlarınız doğrudan bağlantıyı engelliyor olabilir. Bağlantınızı kontrol edip kanala yeniden katılmayı deneyin.',
 
     'progress.complete': 'Aktarım Tamamlandı!',
@@ -185,6 +188,7 @@ const translations = {
     'alert.peerCancelled': 'Karşı taraf aktarımı iptal etti.',
     'alert.invalidRoom': 'Lütfen geçerli bir Kanal Kimliği girin.',
     'confirm.disconnect': 'Geçerli güvenli kanaldan bağlantı kesilsin mi?',
+    'alert.resumeMismatch': 'Yeniden bağlandıktan sonra güvenlik kodu değişti ve otomatik olarak doğrulanamadı. Yeni kodu karşılaştırıp elle doğrulayın.',
     'alert.cryptoUnavailable': 'Şifreleme kullanılamıyor: bu uygulama HTTPS üzerinden ya da http://localhost ile açılmalıdır. Cihazlar arası bir LAN IP\'sinde test ediyorsanız, tarayıcı güvenli olmayan kaynaklarda Web Crypto API\'sini devre dışı bırakır, bu yüzden güvenlik kodu oluşturulamaz.',
 
     'files.summaryOne': '{count} dosya seçildi · {size}',

@@ -85,6 +85,20 @@ let iceRecoveryTimer = null;
 // once the remote description is in, rather than dropping it (a dropped relay
 // candidate is why the first handshake sometimes failed until a rejoin).
 let pendingCandidates = [];
+// --- Session resumption (key continuity across reconnects) ---
+// Once a session reaches both-verified, its resume HMAC key is promoted to
+// "trusted" for the room. On the next handshake in the same room, each side
+// sends HMAC(trustedKey, newFingerprint); a valid MAC proves the peer held the
+// previously verified session, so verification completes automatically instead
+// of asking the user to re-compare the code after every drop. A MITM inserted
+// at reconnect can't produce the MAC and falls back to manual verification.
+let candidateResumeKey = null; // HMAC key of the current (unverified) handshake
+let trustedResumeKey = null; // promoted once both sides verified
+let trustedResumeRoom = null;
+let currentFingerprintCode = null;
+// Auto-reconnect backoff: rejoin retries after a failed re-handshake.
+let reconnectAttempts = 0;
+let reconnectRetryTimer = null;
 // --- Resumable transfers ---
 // Partially-received files stashed by content hash when a transfer is
 // interrupted (peer drop), so a re-send resumes from the first missing chunk.
@@ -261,7 +275,23 @@ async function deriveSessionKey(rawPeerPublicKeyBase64) {
     false,
     ['encrypt', 'decrypt']
   );
-  
+
+  // Sibling secret for session resumption (distinct HKDF label; same 32 bytes
+  // as the mobile client derives). Never used for encryption — only to HMAC
+  // "I held the previously verified session" across a reconnect.
+  candidateResumeKey = await window.crypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      salt: salt,
+      info: new TextEncoder().encode('VaultShare Resume Key'),
+      hash: 'SHA-256'
+    },
+    hkdfKey,
+    { name: 'HMAC', hash: 'SHA-256', length: 256 },
+    false,
+    ['sign', 'verify']
+  );
+
   log('AES-GCM session key established. Encryption active!', 'crypto');
   
   // Calculate visual verification fingerprint code
@@ -282,6 +312,7 @@ async function computeFingerprint(rawPeerPublicKeyBase64) {
   
   // Group key fingerprint into readable chunks
   const groups = hashHex.match(/.{1,4}/g).slice(0, 8).join('-');
+  currentFingerprintCode = groups;
   displayFingerprint.innerText = groups;
   log(`Calculated line verification code: ${groups}`, 'crypto');
   // A peer is now connected (keys exchanged) — the join QR is no longer needed.
@@ -351,6 +382,11 @@ function initSignaling() {
       switch (msg.type) {
         case 'joined':
           log(`Joined room: ${msg.roomId} as peer #${msg.peerCount}`, 'p2p');
+          // A verified-session resume key never crosses rooms.
+          if (trustedResumeRoom && trustedResumeRoom !== msg.roomId) {
+            trustedResumeKey = null;
+            trustedResumeRoom = null;
+          }
           roomId = msg.roomId;
           isInitiator = (msg.peerCount === 1);
           showConnectionUI(msg.roomId);
@@ -468,7 +504,11 @@ async function handleSignal(payload) {
     
     await deriveSessionKey(payload.key);
     textChannelStatus.innerText = t('status.fingerprintReady');
-    
+
+    // If we hold a verified session's resume key for this room, offer
+    // continuity: prove to the peer that we're the same verified device.
+    await maybeSendResumeAuth();
+
     // Now that the line is secure, the initiator creates the WebRTC offer
     if (isInitiator) {
       log('Line secured. Initiating WebRTC peer connection...', 'p2p');
@@ -483,9 +523,12 @@ async function handleSignal(payload) {
         : 'Peer cleared their verification.',
       peerVerified ? 'success' : 'system'
     );
+    promoteResumeSecret();
     refreshVerificationStatus();
     // Re-evaluate the send lock (peer state may have just unlocked/locked it).
     toggleInputStates(isTransferring);
+  } else if (payload.type === 'resume-auth') {
+    await handleResumeAuth(typeof payload.mac === 'string' ? payload.mac : '');
   } else {
     // WebRTC Encrypted Handshake Phase
     if (!aesKey) {
@@ -621,6 +664,7 @@ async function setupWebRTC() {
       clearIceRecoveryTimer();
       log('Direct WebRTC peer connection established!', 'p2p');
       everConnected = true;
+      reconnectAttempts = 0; // the link is up — reset the retry budget
       clearHandshakeTimer();
       connectionError.classList.add('hidden');
       textChannelStatus.innerText = t('status.tunnelActive');
@@ -1497,6 +1541,7 @@ chkVerified.addEventListener('change', () => {
   }
   // Announce our verification state to the peer over the signaling channel.
   sendSignal({ type: chkVerified.checked ? 'verified' : 'unverified' });
+  promoteResumeSecret();
   refreshVerificationStatus();
   // Re-apply lock state (keep everything disabled if a transfer is in flight).
   toggleInputStates(isTransferring);
@@ -1531,6 +1576,78 @@ function refreshVerificationStatus() {
     textChannelStatus.innerText = t('status.peerVerifiedConfirm');
   } else {
     textChannelStatus.innerText = t('status.verifyBoth');
+  }
+}
+
+// --- Session resumption ---
+
+// Once BOTH sides have verified the current handshake, its resume key becomes
+// the trusted continuity anchor for this room (rotating whatever a previous
+// handshake left behind).
+function promoteResumeSecret() {
+  if (!chkVerified.checked || !peerVerified || !roomId || !candidateResumeKey) return;
+  trustedResumeKey = candidateResumeKey;
+  trustedResumeRoom = roomId;
+}
+
+// After a re-handshake in a room we previously verified in, prove key
+// continuity: MAC the NEW fingerprint with the OLD session's resume key.
+// Binding the proof to the new fingerprint makes it single-use — it can't be
+// replayed into any other handshake.
+async function maybeSendResumeAuth() {
+  if (!trustedResumeKey || trustedResumeRoom !== roomId || !currentFingerprintCode) return;
+  const mac = await window.crypto.subtle.sign(
+    'HMAC',
+    trustedResumeKey,
+    new TextEncoder().encode(currentFingerprintCode)
+  );
+  log('Offering session resumption (continuity proof sent).', 'crypto');
+  sendSignal({ type: 'resume-auth', mac: arrayBufferToBase64(mac) });
+}
+
+// The peer claims to be the same device we verified before. Check the MAC
+// against our own trusted key; a match auto-verifies our side — no manual code
+// comparison needed after a drop. A mismatch (or a claim we can't check) falls
+// back to the normal manual verification.
+async function handleResumeAuth(macBase64) {
+  if (!trustedResumeKey || trustedResumeRoom !== roomId) {
+    log(
+      'Peer offered session resumption, but we hold no verified session for this room — manual verification required.',
+      'system'
+    );
+    return;
+  }
+  if (!currentFingerprintCode || !macBase64) return;
+  let valid = false;
+  try {
+    valid = await window.crypto.subtle.verify(
+      'HMAC',
+      trustedResumeKey,
+      base64ToArrayBuffer(macBase64),
+      new TextEncoder().encode(currentFingerprintCode)
+    );
+  } catch (err) {
+    valid = false;
+  }
+  if (!valid) {
+    // Could be a MITM at reconnect or a stale/foreign key — never auto-verify
+    // on a bad proof, and tell the user to compare the code.
+    log('Session resumption proof INVALID — verify the security code manually.', 'error');
+    alert(t('alert.resumeMismatch'));
+    return;
+  }
+  log('Peer proved continuity of the verified session. Auto-verifying...', 'success');
+  if (!chkVerified.checked) {
+    // Setting .checked programmatically doesn't fire the change listener, so
+    // replicate its actions: announce to the peer and refresh the UI locks.
+    chkVerified.checked = true;
+    sendSignal({ type: 'verified' });
+  }
+  promoteResumeSecret();
+  refreshVerificationStatus();
+  toggleInputStates(isTransferring);
+  if (chkVerified.checked && peerVerified) {
+    textChannelStatus.innerText = t('status.reconnected');
   }
 }
 
@@ -1618,9 +1735,40 @@ function startHandshakeTimer() {
     handshakeTimer = null;
     if (everConnected || !peerConnection) return; // tunnel came up / already gone
     log('Secure P2P connection timed out before the tunnel opened.', 'error');
+    // If this was a RE-connect of a previously verified session, retry the
+    // rejoin a few times with backoff before declaring failure — transient
+    // network conditions right after a drop often clear up in seconds.
+    const canRetry =
+      trustedResumeKey !== null &&
+      trustedResumeRoom === roomId &&
+      ws && ws.readyState === WebSocket.OPEN &&
+      reconnectAttempts < 3;
+    if (canRetry) {
+      reconnectAttempts += 1;
+      const delay = [2000, 5000, 10000][reconnectAttempts - 1];
+      log(
+        `Retrying the secure reconnection (attempt ${reconnectAttempts}/3) in ${delay / 1000}s...`,
+        'p2p'
+      );
+      resetSecureSession();
+      reconnectRetryTimer = setTimeout(() => {
+        reconnectRetryTimer = null;
+        if (roomId && ws && ws.readyState === WebSocket.OPEN) {
+          sendWS({ type: 'join', roomId });
+        }
+      }, delay);
+      return;
+    }
     connectionError.classList.remove('hidden');
     resetSecureSession();
   }, 12000);
+}
+
+function clearReconnectRetryTimer() {
+  if (reconnectRetryTimer !== null) {
+    clearTimeout(reconnectRetryTimer);
+    reconnectRetryTimer = null;
+  }
 }
 
 function clearHandshakeTimer() {
@@ -1703,10 +1851,13 @@ function resetSecureSession() {
   }
 
   // Discard all cryptographic material so the next handshake starts clean and no
-  // stale key could ever be reused.
+  // stale key could ever be reused. The TRUSTED resume key survives on purpose —
+  // it's what lets the next handshake in this room auto-verify.
   myKeyPair = null;
   peerPublicKey = null;
   aesKey = null;
+  candidateResumeKey = null;
+  currentFingerprintCode = null;
   peerVerified = false;
   chkVerified.checked = false;
   updateVerifyBadges();
@@ -1755,10 +1906,17 @@ function resetConnection() {
   }
 
   // Wipe all cryptographic material and session identity so nothing carries
-  // over into the next room/peer.
+  // over into the next room/peer. Leaving the room ends the continuity chain —
+  // a future session in this room must be verified by hand again.
   myKeyPair = null;
   peerPublicKey = null;
   aesKey = null;
+  candidateResumeKey = null;
+  trustedResumeKey = null;
+  trustedResumeRoom = null;
+  currentFingerprintCode = null;
+  clearReconnectRetryTimer();
+  reconnectAttempts = 0;
   isInitiator = false;
   roomId = null;
   peerVerified = false;
