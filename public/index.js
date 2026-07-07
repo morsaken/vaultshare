@@ -612,7 +612,11 @@ async function handleSignal(payload) {
         // flush after setRemoteDescription so no early candidate is lost.
         if (peerConnection && peerConnection.remoteDescription) {
           log('Received encrypted ICE candidate.', 'p2p');
-          await peerConnection.addIceCandidate(new RTCIceCandidate(decrypted.candidate));
+          try {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(decrypted.candidate));
+          } catch (err) {
+            log(`Failed to add ICE candidate: ${err.message}`, 'error');
+          }
         } else {
           pendingCandidates.push(decrypted.candidate);
         }
@@ -636,6 +640,7 @@ async function decryptPayload(ciphertextBase64) {
 
 // --- WebRTC P2P Manager ---
 async function setupWebRTC() {
+  clearIceRecoveryTimer();
   // A new handshake supersedes any existing connection (duplicate ecdh-pub
   // after a re-pair, or a fresh offer from a rebuilt initiator). Tear the old
   // one down first — keeping it alive would race two negotiations over one
@@ -760,6 +765,14 @@ function setupDataChannel(channel) {
   
   channel.onclose = () => {
     log('P2P Data Channel closed.', 'p2p');
+    // If the channel closed on its own (peer dropped / network died) rather
+    // than from our own resetSecureSession() — which nulls `dataChannel` before
+    // the close event fires — wipe the secure session but stay in the room and
+    // wait for the peer to reconnect.
+    if (dataChannel === channel) {
+      log('Data channel closed unexpectedly. Waiting for peer to reconnect...', 'error');
+      handleP2PFailure();
+    }
   };
   
   // handleIncomingData is async (it awaits decrypt/hash). Without serializing,
