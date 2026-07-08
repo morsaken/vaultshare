@@ -75,6 +75,7 @@ const translations = {
 
     'progress.complete': 'Transfer Complete!',
     'progress.batchLabel': 'File {index}/{count}: ',
+    'progress.reading': 'Reading file...',
     'progress.checksum': 'Calculating SHA-256 checksum...',
     'progress.sendingMeta': 'Encrypting & sending metadata...',
     'progress.reassembling': 'Reassembling and verifying file...',
@@ -170,6 +171,7 @@ const translations = {
 
     'progress.complete': 'Aktarım Tamamlandı!',
     'progress.batchLabel': 'Dosya {index}/{count}: ',
+    'progress.reading': 'Dosya okunuyor...',
     'progress.checksum': 'SHA-256 sağlama toplamı hesaplanıyor...',
     'progress.sendingMeta': 'Üst veri şifrelenip gönderiliyor...',
     'progress.reassembling': 'Dosya yeniden birleştirilip doğrulanıyor...',

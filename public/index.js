@@ -909,12 +909,13 @@ async function sendSingleFile(file, fileIndex, fileCount) {
 
   log(`${tag} Preparing to send (${formatFileSize(file.size)}).`, 'send');
 
-  progressStatus.innerText = `${batchLabel}${t('progress.checksum')}`;
+  progressStatus.innerText = `${batchLabel}${t('progress.reading')}`;
   progressPercent.innerText = '0%';
   progressBarFill.style.width = '0%';
 
   const fileBytes = await file.arrayBuffer();
 
+  progressStatus.innerText = `${batchLabel}${t('progress.checksum')}`;
   log(`${tag} Generating SHA-256 checksum for integrity verification...`, 'crypto');
   const fileHash = await calculateSHA256(fileBytes);
   log(`${tag} Checksum derived: ${fileHash}`, 'crypto');
