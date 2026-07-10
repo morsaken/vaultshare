@@ -1067,6 +1067,23 @@ input[type="text"]:focus {
   border-bottom-color: var(--primary);
 }
 
+.footer-sep {
+  margin: 0 0.5rem;
+  color: var(--text-muted);
+}
+
+.footer-store-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.footer-store-icon {
+  width: 0.85em;
+  height: 0.85em;
+  flex-shrink: 0;
+}
+
 /* Helpers */
 .hidden {
   display: none !important;

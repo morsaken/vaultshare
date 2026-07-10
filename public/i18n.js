@@ -59,6 +59,7 @@ const translations = {
 
     'footer.text': 'All encryption keys and data transfers are ephemeral. No files ever touch our servers.',
     'footer.privacy': 'Privacy Policy',
+    'footer.ios': 'iOS App',
 
     'status.securing': 'Securing connection...',
     'status.keyExchange': 'Performing key exchange...',
@@ -155,6 +156,7 @@ const translations = {
 
     'footer.text': 'Tüm şifreleme anahtarları ve veri aktarımları geçicidir. Hiçbir dosya sunucularımıza dokunmaz.',
     'footer.privacy': 'Gizlilik Politikası',
+    'footer.ios': 'iOS Uygulaması',
 
     'status.securing': 'Bağlantı güvenli hâle getiriliyor...',
     'status.keyExchange': 'Anahtar değişimi yapılıyor...',
